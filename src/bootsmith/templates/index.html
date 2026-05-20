@@ -253,6 +253,10 @@
         if (es) { try { es.close(); } catch (_) {} es = null; }
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         lastProfile = null;
+        // Reset session-scoped state so the NEXT connect re-loads params
+        // fresh. Previously this stuck and made the second connect look
+        // like nothing was happening.
+        paramsLoadedForLoader = null;
       }
 
       // Decide whether to start/stop based on whether the session DOM is present.

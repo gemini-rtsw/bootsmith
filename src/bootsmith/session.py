@@ -45,38 +45,21 @@ class SessionManager:
         with self._lock:
             self._session = Session(profile=profile, transport=transport, watcher=watcher)
 
-        # Auto-prompt: after IAC negotiation settles, try to surface the
-        # loader prompt so the user sees something immediately. Runs once,
-        # bails the moment the watcher reports at_prompt so it cannot race
-        # with a user-initiated write_params (which would otherwise be
-        # corrupted by a rogue ^D landing mid-c-dialogue).
+        # Auto-prompt: after IAC negotiation settles, send a single CR to
+        # nudge the board into echoing whatever prompt it has. Runs once
+        # and exits. No retries, no ^D — both caused races with in-flight
+        # Push-to-board c-dialogues (rogue ^D in the middle of a field).
+        # If the user lands on a board mid-dialogue or with no prompt
+        # visible, the Force prompt button is one click away.
         def _bump():
             import time as _t
 
             _t.sleep(0.8)
-            # Already at prompt? Nothing to do.
             if watcher.status().state == "at_prompt":
                 return
             try:
-                # ^D in case the prior session left the board mid-`c` dialogue.
-                # If already at the prompt this is harmless (ignored).
-                transport.write(b"\x04")
-                _t.sleep(0.15)
                 transport.write(b"\r")
                 _t.sleep(0.5)
-                watcher.force_prompt()
-            except Exception:
-                return
-            # Single retry only if we still haven't matched a prompt after
-            # the first nudge. Guard against firing during an in-flight
-            # write: if the watcher reports at_prompt at any point, stop.
-            for _ in range(8):
-                _t.sleep(0.1)
-                if watcher.status().state == "at_prompt":
-                    return
-            try:
-                transport.write(b"\r")
-                _t.sleep(0.4)
                 watcher.force_prompt()
             except Exception:
                 return
