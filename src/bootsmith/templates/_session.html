@@ -1,0 +1,119 @@
+<section class="session" data-profile="{{ profile.name }}">
+  <div class="session-header">
+    <h2>{{ profile.name }}</h2>
+    <span class="meta">{{ profile.wti_host }}:{{ profile.wti_port }}</span>
+    <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
+      <button type="submit" class="danger">Disconnect</button>
+    </form>
+  </div>
+
+  <div class="status-bar">
+    <span id="status-state" class="state-pill">connecting</span>
+    <span id="status-loader"></span>
+    <span id="status-aborts"></span>
+    <span id="status-bytes"></span>
+  </div>
+
+  <div id="status-banner" class="banner hidden"></div>
+
+  <pre id="serial" class="serial" aria-live="polite"></pre>
+
+  <div class="controls">
+    <form hx-post="/session/send" hx-swap="none" class="row">
+      <input name="data" placeholder="send raw (use \r for CR, \n for LF)" autocomplete="off">
+      <button type="submit">Send</button>
+    </form>
+    <form hx-post="/session/force-prompt" hx-swap="none" class="inline">
+      <button type="submit" title="Sends CR and tries to match a loader prompt — use if the board is already halted">Force prompt</button>
+    </form>
+    <form hx-post="/session/rearm" hx-swap="none" class="inline" id="rearm-form" style="display:none">
+      <button type="submit" class="primary" title="Reset watcher to waiting state so you can reboot again">Re-arm</button>
+    </form>
+  </div>
+
+  <p class="hint">
+    Reboot the board now. Bootsmith will watch for a boot banner and spam the abort key.
+  </p>
+
+  <script>
+    (function () {
+      const pre = document.getElementById("serial");
+      const state = document.getElementById("status-state");
+      const bytes = document.getElementById("status-bytes");
+
+      function append(b64) {
+        const bin = atob(b64);
+        // Render as ASCII; replace bare CR with nothing and let LF do line breaks.
+        // Bootloaders are CR-LF terminated, so this works for both PPCBug and VxWorks.
+        let s = "";
+        for (let i = 0; i < bin.length; i++) {
+          const c = bin.charCodeAt(i);
+          if (c === 13) continue;
+          if (c === 9 || c === 10 || (c >= 32 && c < 127)) {
+            s += String.fromCharCode(c);
+          } else {
+            s += "\\x" + c.toString(16).padStart(2, "0");
+          }
+        }
+        pre.appendChild(document.createTextNode(s));
+        // Cap displayed length so very long sessions don't slow the page.
+        if (pre.textContent.length > 200000) {
+          pre.textContent = pre.textContent.slice(-150000);
+        }
+        pre.scrollTop = pre.scrollHeight;
+      }
+
+      const es = new EventSource("/session/stream");
+      es.addEventListener("snapshot", (e) => append(e.data));
+      es.addEventListener("chunk", (e) => append(e.data));
+      es.addEventListener("closed", () => {
+        state.textContent = "closed";
+        es.close();
+      });
+      es.onerror = () => { state.textContent = "stream error"; };
+
+      // Poll status frequently for watcher state and byte counters.
+      const aborts = document.getElementById("status-aborts");
+      const loaderEl = document.getElementById("status-loader");
+      const banner = document.getElementById("status-banner");
+      const rearm = document.getElementById("rearm-form");
+
+      const STATE_LABEL = {
+        idle: "idle",
+        waiting: "waiting for reboot",
+        aborting: "ABORTING — spamming key",
+        at_prompt: "AT PROMPT",
+        missed: "MISSED abort window",
+      };
+
+      function applyStatus(j) {
+        if (!j.open) { state.textContent = "closed"; state.className = "state-pill closed"; return; }
+        const label = STATE_LABEL[j.state] || j.state;
+        state.textContent = label;
+        state.className = "state-pill state-" + j.state;
+        loaderEl.textContent = j.loader ? "loader: " + j.loader : "";
+        aborts.textContent = j.abort_chars_sent ? "abort: " + j.abort_chars_sent + "B sent" : "";
+        if (j.transport) {
+          bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
+        }
+        rearm.style.display = (j.state === "missed") ? "" : "none";
+        if (j.notes && j.notes.length) {
+          banner.textContent = j.notes[j.notes.length - 1];
+          banner.classList.remove("hidden");
+        } else {
+          banner.classList.add("hidden");
+        }
+      }
+
+      async function poll() {
+        try {
+          const r = await fetch("/session/status");
+          const j = await r.json();
+          applyStatus(j);
+        } catch (_) {}
+      }
+      poll();
+      setInterval(poll, 500);
+    })();
+  </script>
+</section>
