@@ -165,21 +165,38 @@ class VxWorksDialogueTests(unittest.TestCase):
         host_idx = next(
             i for i, (_l, k) in enumerate(FIELDS_WITH_UNIT) if k == "host_name"
         )
-        self.assertEqual(t.writes[1 + host_idx], b"mkogmosdev-lv1\r")
+        # Set-value path now does two writes: a burst of backspaces (to wipe
+        # the firmware's echoed current value) followed by the value+CR.
+        # Counting through the writes is fiddly because keep-current writes
+        # are single while set writes are double. Build the expected stream
+        # and compare.
+        expected_writes = [b"c\r"]
+        for _label, key in FIELDS_WITH_UNIT:
+            if key == "host_name":
+                expected_writes.append(b"\x08" * 80)
+                expected_writes.append(b"mkogmosdev-lv1\r")
+            else:
+                expected_writes.append(b"\r")
+        # The dialogue may also append a trailing "\r" nudge if the prompt
+        # closure isn't seen; ignore writes after the per-field block.
+        prefix = expected_writes
+        self.assertEqual(t.writes[: len(prefix)], prefix)
 
     def test_other_fields_still_kept_when_one_set(self):
         # If you set host_name to a value but leave everything else blank,
-        # every other field should still get just `\r`.
+        # every other field should still get just `\r` (keep current).
+        # host_name itself uses two writes (backspace burst, then value+CR);
+        # every other field uses one (`\r`).
         t = FakeTransport()
         _run_dialogue(t, values={"host_name": "x"})
-        non_host = [
-            w for i, w in enumerate(t.writes[1 : 1 + len(FIELDS_WITH_UNIT)], start=0)
-            if FIELDS_WITH_UNIT[i][1] != "host_name"
-        ]
-        self.assertTrue(
-            all(w == b"\r" for w in non_host),
-            f"non-host writes were: {non_host!r}",
-        )
+        expected = [b"c\r"]
+        for _label, key in FIELDS_WITH_UNIT:
+            if key == "host_name":
+                expected.append(b"\x08" * 80)
+                expected.append(b"x\r")
+            else:
+                expected.append(b"\r")
+        self.assertEqual(t.writes[: len(expected)], expected)
 
 
 if __name__ == "__main__":

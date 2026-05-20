@@ -46,30 +46,40 @@ class SessionManager:
             self._session = Session(profile=profile, transport=transport, watcher=watcher)
 
         # Auto-prompt: after IAC negotiation settles, try to surface the
-        # loader prompt so the user sees something immediately.
-        #
-        # First we send ^D in case the previous user left the board mid-`c`
-        # dialogue — ^D bails out of the dialogue without committing. If the
-        # board is already at the prompt, ^D is harmless. Then a CR makes
-        # the board echo the prompt. We retry once because some boards take
-        # a beat after IAC to start responding.
+        # loader prompt so the user sees something immediately. Runs once,
+        # bails the moment the watcher reports at_prompt so it cannot race
+        # with a user-initiated write_params (which would otherwise be
+        # corrupted by a rogue ^D landing mid-c-dialogue).
         def _bump():
             import time as _t
 
             _t.sleep(0.8)
-            for delay in (0.0, 0.6):
-                if delay:
-                    _t.sleep(delay)
-                try:
-                    transport.write(b"\x04")  # ^D — quit any open c dialogue
-                    _t.sleep(0.15)
-                    transport.write(b"\r")
-                    _t.sleep(0.4)
-                    watcher.force_prompt()
-                except Exception:
-                    return
+            # Already at prompt? Nothing to do.
+            if watcher.status().state == "at_prompt":
+                return
+            try:
+                # ^D in case the prior session left the board mid-`c` dialogue.
+                # If already at the prompt this is harmless (ignored).
+                transport.write(b"\x04")
+                _t.sleep(0.15)
+                transport.write(b"\r")
+                _t.sleep(0.5)
+                watcher.force_prompt()
+            except Exception:
+                return
+            # Single retry only if we still haven't matched a prompt after
+            # the first nudge. Guard against firing during an in-flight
+            # write: if the watcher reports at_prompt at any point, stop.
+            for _ in range(8):
+                _t.sleep(0.1)
                 if watcher.status().state == "at_prompt":
                     return
+            try:
+                transport.write(b"\r")
+                _t.sleep(0.4)
+                watcher.force_prompt()
+            except Exception:
+                return
 
         threading.Thread(target=_bump, name="auto-prompt", daemon=True).start()
         return self._session

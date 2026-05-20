@@ -168,6 +168,13 @@ def write_params(
                 transport.write(b".\r")
                 fields_written.append(key)
             else:
+                # Some VxWorks firmware echoes the current value at the
+                # prompt and then accepts user input AFTER it, concatenating
+                # the two. Result: writing "geisc" when the field already
+                # shows "p0 " produces "p0 geisc". Defend by sending a burst
+                # of backspaces first to wipe whatever the firmware echoed.
+                # 80 covers any reasonable existing value; extras are no-ops.
+                transport.write(b"\x08" * 80)
                 transport.write(raw_value.encode() + b"\r")
                 fields_written.append(key)
 
