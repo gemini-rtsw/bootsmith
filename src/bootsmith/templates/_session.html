@@ -37,6 +37,9 @@
     <form hx-post="/session/rearm" hx-swap="none" class="inline" id="rearm-form" style="display:none">
       <button type="submit" class="primary" title="Reset watcher to waiting state so you can reboot again">Re-arm</button>
     </form>
+    <form hx-post="/session/reconnect" hx-swap="none" class="inline" id="reconnect-form" style="display:none">
+      <button type="submit" class="primary" title="The WTI dropped our socket. Reopen it.">Reconnect</button>
+    </form>
     <label class="terminal-mode-toggle">
       <input type="checkbox" id="terminal-raw" />
       <span title="Send each keystroke immediately. When off, sends the line on Enter.">raw key mode</span>

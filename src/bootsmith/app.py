@@ -165,12 +165,29 @@ def create_app() -> Flask:
             return _error("no session open"), 404
         # Send a CR to make the board print its prompt, then let the watcher
         # match it from the resulting bytes.
-        sess.transport.write(b"\r")
-        # Give the board a moment to respond before we sample the buffer.
+        try:
+            sess.transport.write(b"\r")
+        except ConnectionError as e:
+            return _error(f"WTI session is dead: {e}. Click Reconnect."), 502
         import time as _t
 
         _t.sleep(0.25)
         sess.watcher.force_prompt()
+        return ("", 204)
+
+    @app.post("/session/reconnect")
+    def session_reconnect():
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        try:
+            sess.transport.reopen()
+        except Exception as e:
+            return _error(f"reconnect failed: {e}"), 502
+        # Restart the watcher subscription cleanly.
+        sess.watcher.stop()
+        sess.watcher.start()
         return ("", 204)
 
     @app.get("/session/stream")
@@ -211,8 +228,11 @@ def create_app() -> Flask:
         if ws.loader != "vxworks":
             return _error(f"loader {ws.loader!r} not supported yet"), 400
         values = dict(sess.profile.boot_params)
-        vxworks_mod.write_params(sess.transport, values)
-        verify = vxworks_mod.read_params(sess.transport)
+        try:
+            vxworks_mod.write_params(sess.transport, values)
+            verify = vxworks_mod.read_params(sess.transport)
+        except ConnectionError as e:
+            return _error(f"WTI session is dead during push: {e}. Reconnect and retry."), 502
         diff = []
         for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
             want = values.get(key, "")
@@ -246,7 +266,10 @@ def create_app() -> Flask:
         raw = request.form.get("data", "")
         # Allow \r, \n, and literal escape "\\r" / "\\n" for one-shot CR / LF sends.
         data = raw.encode("utf-8").replace(b"\\r", b"\r").replace(b"\\n", b"\n")
-        sess.transport.write(data)
+        try:
+            sess.transport.write(data)
+        except ConnectionError as e:
+            return _error(f"WTI session is dead: {e}"), 502
         return ("", 204)
 
     @app.post("/session/key")
@@ -269,7 +292,10 @@ def create_app() -> Flask:
         except Exception:
             return _error("bad base64"), 400
         if data:
-            sess.transport.write(data)
+            try:
+                sess.transport.write(data)
+            except ConnectionError as e:
+                return _error(f"WTI session is dead: {e}"), 502
         return ("", 204)
 
     return app

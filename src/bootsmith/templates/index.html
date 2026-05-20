@@ -65,6 +65,7 @@
         const bytes = document.getElementById("status-bytes");
         const banner = document.getElementById("status-banner");
         const rearm = document.getElementById("rearm-form");
+        const reconnectForm = document.getElementById("reconnect-form");
         const paramsContainer = document.getElementById("params");
         if (!state) return; // session section not in DOM
         if (!j.open) {
@@ -72,6 +73,23 @@
           state.className = "state-pill state-closed";
           return;
         }
+        // Detect WTI-side disconnect: socket is dead but session is still
+        // "open" on our side. Show a reconnect prompt instead of pretending.
+        const transportDead = j.transport && j.transport.connected === false;
+        if (transportDead) {
+          state.textContent = "WTI DROPPED — Reconnect";
+          state.className = "state-pill state-missed";
+          if (reconnectForm) reconnectForm.style.display = "";
+          if (banner && j.transport.error) {
+            banner.textContent = "WTI closed the socket: " + j.transport.error;
+            banner.classList.remove("hidden");
+          }
+          if (bytes) {
+            bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
+          }
+          return;
+        }
+        if (reconnectForm) reconnectForm.style.display = "none";
         state.textContent = STATE_LABEL[j.state] || j.state;
         state.className = "state-pill state-" + j.state;
         if (loaderEl) loaderEl.textContent = j.loader ? "loader: " + j.loader : "";

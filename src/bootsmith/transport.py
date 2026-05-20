@@ -125,12 +125,63 @@ class WTITransport:
             sock.close()
         self._status.connected = False
 
+    def reopen(self, timeout: float = 5.0) -> None:
+        """Tear down and re-establish the TCP connection.
+
+        Used when the WTI drops us (which it does periodically — e.g. another
+        client connects to the same port, or session timeout). Preserves the
+        subscriber list so the SSE stream and watcher keep working without
+        the browser having to reload.
+        """
+        self._stop.set()
+        with self._lock:
+            sock = self._sock
+            self._sock = None
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+        # Re-open.
+        s = socket.create_connection((self.host, self.port), timeout=timeout)
+        s.settimeout(0.5)
+        with self._lock:
+            self._sock = s
+        self._stop.clear()
+        self._status = TransportStatus(
+            connected=True,
+            host=self.host,
+            port=self.port,
+            opened_at=time.time(),
+        )
+        self._reader = threading.Thread(
+            target=self._read_loop,
+            name=f"wti-reader-{self.host}:{self.port}",
+            daemon=True,
+        )
+        self._reader.start()
+
     def write(self, data: bytes) -> None:
         with self._lock:
             sock = self._sock
         if sock is None:
-            raise RuntimeError("transport not open")
-        sock.sendall(data)
+            raise ConnectionError("transport not open")
+        try:
+            sock.sendall(data)
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            # Peer closed the socket. Mark the transport dead so the UI sees
+            # it on the next status poll. Don't let the exception bubble up
+            # as a Flask 500.
+            self._status.error = f"write failed: {e}"
+            self._status.connected = False
+            # Best-effort socket cleanup.
+            with self._lock:
+                self._sock = None
+            try:
+                sock.close()
+            except OSError:
+                pass
+            raise ConnectionError(str(e)) from e
         self._status.bytes_out += len(data)
 
     def status(self) -> TransportStatus:
@@ -170,9 +221,22 @@ class WTITransport:
             except OSError as e:
                 self._status.error = str(e)
                 self._status.connected = False
+                print(
+                    f"[transport {self.host}:{self.port}] read error: {e}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return
             if not raw:
                 self._status.connected = False
+                self._status.error = (
+                    self._status.error or "peer closed connection"
+                )
+                print(
+                    f"[transport {self.host}:{self.port}] peer closed connection",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return
             if not first_chunk_logged:
                 print(
