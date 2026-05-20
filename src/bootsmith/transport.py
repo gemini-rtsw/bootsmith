@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
 
-# Telnet IAC constants — we don't speak telnet, we just defensively strip
-# IAC sequences so a telnet-mode WTI doesn't pollute the serial stream with
-# negotiation bytes. Raw WTIs never send 0xFF, so this is a no-op there.
+# Telnet IAC constants. Some WTI ports speak telnet (not raw) and refuse to
+# forward serial bytes until the client responds to their option negotiation.
+# We handle that by refusing every option — DONT to every DO, WONT to every
+# WILL. That gets the WTI to stop waiting on us and start forwarding bytes.
 IAC = 0xFF
 DONT = 0xFE
 DO = 0xFD
@@ -18,16 +20,17 @@ SB = 0xFA
 SE = 0xF0
 
 
-def _strip_iac(buf: bytes) -> bytes:
-    """Remove telnet IAC sequences. Conservative: drop the bytes, don't reply.
+def _consume_iac(buf: bytes) -> tuple[bytes, bytes]:
+    """Pull IAC sequences out of `buf`.
 
-    A real telnet client would negotiate. For our use a WTI talking telnet at
-    us is usually fine if we just refuse to engage — most WTIs fall back to
-    raw passthrough after a couple of unanswered DOs.
+    Returns (clean_bytes, reply_bytes) where clean_bytes is the buf with IAC
+    sequences removed and reply_bytes is the telnet negotiation reply we
+    should send back to keep the peer happy.
     """
     if IAC not in buf:
-        return buf
+        return buf, b""
     out = bytearray()
+    reply = bytearray()
     i = 0
     n = len(buf)
     while i < n:
@@ -37,9 +40,17 @@ def _strip_iac(buf: bytes) -> bytes:
             i += 1
             continue
         if i + 1 >= n:
+            # Truncated IAC at end of chunk — leave it for next read.
+            # In practice we just drop it; reassembly across chunks is rare here.
             break
         cmd = buf[i + 1]
-        if cmd in (DO, DONT, WILL, WONT):
+        if cmd in (DO, DONT, WILL, WONT) and i + 2 < n:
+            opt = buf[i + 2]
+            # Refuse everything: DO/DONT -> WONT, WILL/WONT -> DONT.
+            if cmd in (DO, DONT):
+                reply.extend(bytes((IAC, WONT, opt)))
+            else:  # WILL, WONT
+                reply.extend(bytes((IAC, DONT, opt)))
             i += 3
         elif cmd == SB:
             j = i + 2
@@ -47,11 +58,12 @@ def _strip_iac(buf: bytes) -> bytes:
                 j += 1
             i = j + 2
         elif cmd == IAC:
+            # Escaped 0xFF in the data stream.
             out.append(IAC)
             i += 2
         else:
             i += 2
-    return bytes(out)
+    return bytes(out), bytes(reply)
 
 
 @dataclass
@@ -145,23 +157,48 @@ class WTITransport:
             return b"".join(self._ring)
 
     def _read_loop(self) -> None:
+        first_chunk_logged = False
         while not self._stop.is_set():
             with self._lock:
                 sock = self._sock
             if sock is None:
                 return
             try:
-                chunk = sock.recv(4096)
+                raw = sock.recv(4096)
             except socket.timeout:
                 continue
             except OSError as e:
                 self._status.error = str(e)
                 self._status.connected = False
                 return
-            if not chunk:
+            if not raw:
                 self._status.connected = False
                 return
-            chunk = _strip_iac(chunk)
+            if not first_chunk_logged:
+                print(
+                    f"[transport {self.host}:{self.port}] first raw chunk "
+                    f"({len(raw)}B): {raw[:64]!r}{'...' if len(raw) > 64 else ''}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                first_chunk_logged = True
+            chunk, reply = _consume_iac(raw)
+            if reply:
+                # Respond to the peer's telnet negotiation. Without this some
+                # WTI firmware never starts forwarding serial bytes.
+                print(
+                    f"[transport {self.host}:{self.port}] telnet reply "
+                    f"({len(reply)}B): {reply!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                try:
+                    sock.sendall(reply)
+                    self._status.bytes_out += len(reply)
+                except OSError as e:
+                    self._status.error = str(e)
+                    self._status.connected = False
+                    return
             if not chunk:
                 continue
             self._status.bytes_in += len(chunk)

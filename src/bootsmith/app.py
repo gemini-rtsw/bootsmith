@@ -72,6 +72,8 @@ def create_app() -> Flask:
 
     @app.post("/session/open")
     def session_open():
+        import sys as _sys
+
         name = (request.form.get("name") or "").strip()
         profile = profiles_mod.get_profile(name)
         if profile is None:
@@ -80,6 +82,12 @@ def create_app() -> Flask:
         try:
             sessions.open(profile)
         except Exception as e:
+            print(
+                f"[session/open] failed for {name!r} -> "
+                f"{profile.wti_host}:{profile.wti_port}: {type(e).__name__}: {e}",
+                file=_sys.stderr,
+                flush=True,
+            )
             return _error(str(e)), 400
         return render_template("_session.html", profile=profile)
 
