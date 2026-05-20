@@ -18,7 +18,125 @@
   </main>
 
   <footer>
-    <small>v0.1 — single session at a time</small>
+    <small>v0.1 &mdash; single session at a time</small>
   </footer>
+
+  <script>
+    // Live-session controller. Loaded once with the page so it survives
+    // htmx swaps that bring the .session fragment in or out of #main.
+    (function () {
+      const STATE_LABEL = {
+        idle: "idle",
+        waiting: "waiting for reboot",
+        aborting: "ABORTING — spamming key",
+        at_prompt: "AT PROMPT",
+        missed: "MISSED abort window",
+      };
+
+      let es = null;
+      let pollTimer = null;
+      let lastProfile = null;
+
+      function bytesAppend(pre, b64) {
+        const bin = atob(b64);
+        let s = "";
+        for (let i = 0; i < bin.length; i++) {
+          const c = bin.charCodeAt(i);
+          if (c === 13) continue;
+          if (c === 9 || c === 10 || (c >= 32 && c < 127)) {
+            s += String.fromCharCode(c);
+          } else {
+            s += "\\x" + c.toString(16).padStart(2, "0");
+          }
+        }
+        pre.appendChild(document.createTextNode(s));
+        if (pre.textContent.length > 200000) {
+          pre.textContent = pre.textContent.slice(-150000);
+        }
+        pre.scrollTop = pre.scrollHeight;
+      }
+
+      function applyStatus(j) {
+        const state = document.getElementById("status-state");
+        const loaderEl = document.getElementById("status-loader");
+        const aborts = document.getElementById("status-aborts");
+        const bytes = document.getElementById("status-bytes");
+        const banner = document.getElementById("status-banner");
+        const rearm = document.getElementById("rearm-form");
+        if (!state) return; // session section not in DOM
+        if (!j.open) {
+          state.textContent = "closed";
+          state.className = "state-pill state-closed";
+          return;
+        }
+        state.textContent = STATE_LABEL[j.state] || j.state;
+        state.className = "state-pill state-" + j.state;
+        if (loaderEl) loaderEl.textContent = j.loader ? "loader: " + j.loader : "";
+        if (aborts) aborts.textContent = j.abort_chars_sent ? "abort: " + j.abort_chars_sent + "B sent" : "";
+        if (bytes && j.transport) {
+          bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
+        }
+        if (rearm) rearm.style.display = (j.state === "missed") ? "" : "none";
+        if (banner) {
+          if (j.notes && j.notes.length) {
+            banner.textContent = j.notes[j.notes.length - 1];
+            banner.classList.remove("hidden");
+          } else {
+            banner.classList.add("hidden");
+          }
+        }
+      }
+
+      async function poll() {
+        try {
+          const r = await fetch("/session/status");
+          const j = await r.json();
+          applyStatus(j);
+        } catch (_) {}
+      }
+
+      function start(profile) {
+        stop();
+        lastProfile = profile;
+        const pre = document.getElementById("serial");
+        console.log("[bootsmith] starting EventSource for", profile);
+        es = new EventSource("/session/stream");
+        es.addEventListener("snapshot", (e) => pre && bytesAppend(pre, e.data));
+        es.addEventListener("chunk", (e) => pre && bytesAppend(pre, e.data));
+        es.addEventListener("closed", () => {
+          console.log("[bootsmith] stream closed event");
+          stop();
+        });
+        es.onerror = (e) => {
+          console.warn("[bootsmith] EventSource error", e);
+          const state = document.getElementById("status-state");
+          if (state) state.textContent = "stream error";
+        };
+        poll();
+        pollTimer = setInterval(poll, 500);
+      }
+
+      function stop() {
+        if (es) { try { es.close(); } catch (_) {} es = null; }
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        lastProfile = null;
+      }
+
+      // Decide whether to start/stop based on whether the session DOM is present.
+      function reconcile() {
+        const section = document.querySelector(".session[data-profile]");
+        if (section) {
+          const p = section.getAttribute("data-profile");
+          if (p !== lastProfile) start(p);
+        } else {
+          stop();
+        }
+      }
+
+      // Run on initial load and after every htmx swap.
+      document.addEventListener("DOMContentLoaded", reconcile);
+      document.body.addEventListener("htmx:afterSwap", reconcile);
+    })();
+  </script>
 </body>
 </html>

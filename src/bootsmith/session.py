@@ -33,15 +33,16 @@ class SessionManager:
         return self._session
 
     def open(self, profile: Profile) -> Session:
+        # If a session is already open, close it cleanly first so we don't
+        # leak a TCP socket every time the user clicks a profile twice.
+        existing = self._session
+        if existing is not None:
+            self.close()
+        transport = WTITransport(profile.wti_host, profile.wti_port)
+        transport.open()
+        watcher = BannerWatcher(transport, profile)
+        watcher.start()
         with self._lock:
-            if self._session is not None:
-                raise RuntimeError(
-                    f"a session is already open for {self._session.profile.name!r}; close it first"
-                )
-            transport = WTITransport(profile.wti_host, profile.wti_port)
-            transport.open()
-            watcher = BannerWatcher(transport, profile)
-            watcher.start()
             self._session = Session(profile=profile, transport=transport, watcher=watcher)
             return self._session
 

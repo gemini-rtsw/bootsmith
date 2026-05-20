@@ -152,15 +152,24 @@ def _sse(sess):
     'chunk' events as new bytes arrive. Keepalive comments every ~15s so
     proxies don't kill the connection.
     """
+    import sys
+
     transport = sess.transport
+    print(
+        f"[sse] subscriber attached for {sess.profile.name} ({transport.host}:{transport.port})",
+        file=sys.stderr,
+        flush=True,
+    )
     snapshot = transport.snapshot()
     yield f"event: snapshot\ndata: {_b64(snapshot)}\n\n"
     q = transport.subscribe()
     last_keepalive = time.time()
+    chunks_sent = 0
     try:
         while True:
             if q:
                 chunk = q.popleft()
+                chunks_sent += 1
                 yield f"event: chunk\ndata: {_b64(chunk)}\n\n"
             else:
                 now = time.time()
@@ -173,6 +182,11 @@ def _sse(sess):
                 return
     finally:
         transport.unsubscribe(q)
+        print(
+            f"[sse] subscriber detached after {chunks_sent} chunks",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _b64(b: bytes) -> str:
