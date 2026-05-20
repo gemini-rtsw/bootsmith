@@ -137,51 +137,97 @@ def write_params(
     raw_buf = bytearray()
     fields_written: list[str] = []
 
+    # Build a "next prompt OR end-of-dialogue" matcher once. Some firmware
+    # variants skip fields that don't apply (e.g. unit_number on a dc/geisc
+    # board), so the dialogue is not a fixed sequence — it's whichever
+    # subset of fields this firmware decides to show, in any order. We
+    # match the next prompt by label, look up the field, send the value,
+    # repeat until the [VxWorks Boot]: prompt comes back.
+    label_to_key = {label: key for label, key in FIELDS_WITH_UNIT}
+    # Sort labels longest-first so the regex prefers the most specific match
+    # (e.g. matches "ftp password (pw) (blank = use rsh)" before any prefix
+    # of it). re.search returns the first match in the string, so we apply
+    # the regex to the LAST line of the buffer only — that line is the
+    # prompt the dialogue is currently sitting at.
+    labels_sorted = sorted(
+        (label for label, _ in FIELDS_WITH_UNIT), key=len, reverse=True
+    )
+    labels_alt = b"|".join(re.escape(l.encode()) for l in labels_sorted)
+    # Match a label followed by colon. findall gives matches in order;
+    # the last one in the buffer is the prompt the dialogue is currently
+    # sitting at.
+    next_prompt_re = re.compile(rb"(" + labels_alt + rb")\s*:")
+
     q = transport.subscribe()
     try:
         transport.write(b"c\r")
-        for label, key in FIELDS_WITH_UNIT:
-            # Wait for the EXACT label followed by ":" near end-of-buffer.
-            # Some firmware versions display the current value after the
-            # colon and then wait; others just show the colon. Either way,
-            # ": " followed by no further newline is the anchor.
-            pat = re.compile(
-                rb"(^|[\r\n])" + re.escape(label.encode())
-                + rb"[^\r\n:]*:\s*([^\r\n]*)$"
-            )
-            if _read_until(q, pat, timeout=timeout_per_field, accumulator=raw_buf) is None:
-                _log(
-                    f"timed out waiting for prompt for {label!r}; aborting write"
-                )
-                # Try to bail out cleanly by sending ^D (quit).
+        last_buf_len = len(raw_buf)
+        # Loop forever; we exit when we see [VxWorks Boot]: which means
+        # the dialogue closed.
+        for _ in range(64):  # hard cap so a misbehaving board can't loop us
+            # Wait until buf GROWS — i.e. new bytes arrive — before deciding
+            # we've seen a new prompt. Without this, the same prompt match
+            # fires repeatedly and we spam responses.
+            deadline = time.time() + timeout_per_field
+            grew = False
+            while time.time() < deadline:
+                while q:
+                    raw_buf.extend(q.popleft())
+                if len(raw_buf) > last_buf_len:
+                    grew = True
+                    break
+                time.sleep(0.02)
+            if not grew:
+                _log("timed out waiting for next prompt; sending ^D to bail")
                 try:
                     transport.write(b"\x04")
                 except Exception:
                     pass
                 break
+            last_buf_len = len(raw_buf)
+
+            tail = bytes(raw_buf[-512:])
+            if PROMPT_RE.search(tail):
+                # Dialogue closed cleanly.
+                break
+
+            # Identify the prompt the dialogue is currently sitting at by
+            # finding the LAST occurrence of a known label followed by ":".
+            matches = next_prompt_re.findall(tail)
+            label_match: Optional[bytes] = None
+            if matches:
+                last = matches[-1]
+                label_match = last[0] if isinstance(last, tuple) else last
+            if label_match is None:
+                transport.write(b"\r")
+                continue
+            label = label_match.decode()
+            key = label_to_key.get(label)
+            if key is None:
+                transport.write(b"\r")
+                continue
 
             raw_value = values.get(key, "")
             if raw_value == "":
-                # Keep current.
                 transport.write(b"\r")
             elif raw_value == ".":
                 transport.write(b".\r")
                 fields_written.append(key)
             else:
                 # Just send the value + CR. VxWorks `c` replaces the field
-                # cleanly when a new value is typed. Backspaces do not work
-                # in this loader (they get echoed as literal chars and
-                # corrupt the input), so we don't try to clear first.
+                # cleanly. Backspaces do not work in this loader.
                 transport.write(raw_value.encode() + b"\r")
                 fields_written.append(key)
+        else:
+            _log("dialogue exceeded 64 iterations; bailing with ^D")
+            try:
+                transport.write(b"\x04")
+            except Exception:
+                pass
 
-        # After the last field, the boot ROM returns to the [VxWorks Boot]:
-        # prompt. Wait for it explicitly so any follow-up command (like the
-        # verify `p`) goes to the prompt, not into the dialogue.
-        if _read_until(q, PROMPT_RE, timeout=4.0, accumulator=raw_buf) is None:
-            _log("did not see [VxWorks Boot]: after dialogue; sending CR to nudge")
-            transport.write(b"\r")
-            _read_until(q, PROMPT_RE, timeout=2.0, accumulator=raw_buf)
+        # Make sure we end at the loader prompt before returning.
+        if not PROMPT_RE.search(bytes(raw_buf[-512:])):
+            _read_until(q, PROMPT_RE, timeout=3.0, accumulator=raw_buf)
     finally:
         transport.unsubscribe(q)
 

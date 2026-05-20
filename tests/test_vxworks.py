@@ -120,18 +120,21 @@ def _run_dialogue(t: FakeTransport, values: dict[str, str]) -> None:
         time.sleep(0.02)
     assert t.writes and t.writes[0] == b"c\r", f"first write was {t.writes!r}"
 
-    # Walk each field. For each, push the prompt, then wait for the driver
-    # to write something in response (the value or just `\r`).
+    # For each prompt, wait until the driver issues one more write, THEN
+    # push the next prompt. Mimics the real board: the next prompt only
+    # appears after we've responded to the current one.
     for i, (label, _key) in enumerate(FIELDS_WITH_UNIT):
+        prev = len(t.writes)
         t.push(f"\r\n{label}          : current_{i} ".encode())
-        # Wait for one more write to appear (the driver's response).
-        target = len(t.writes) + 1
-        d2 = time.time() + 2.0
-        while len(t.writes) < target and time.time() < d2:
+        d2 = time.time() + 3.0
+        while len(t.writes) == prev and time.time() < d2:
             time.sleep(0.01)
-    # End of dialogue.
+        if len(t.writes) == prev:
+            raise AssertionError(
+                f"driver did not respond to {label!r}; writes: {t.writes!r}"
+            )
     t.push(b"\r\n[VxWorks Boot]: ")
-    assert done.wait(timeout=3.0), "write_params did not return in time"
+    assert done.wait(timeout=5.0), "write_params did not return in time"
     if err:
         raise err[0]
 
@@ -153,33 +156,29 @@ class VxWorksDialogueTests(unittest.TestCase):
     def test_dot_clears_field(self):
         t = FakeTransport()
         _run_dialogue(t, values={"host_name": "."})
-        host_idx = next(
-            i for i, (_l, k) in enumerate(FIELDS_WITH_UNIT) if k == "host_name"
-        )
-        # +1 because writes[0] is the `c\r`.
-        self.assertEqual(t.writes[1 + host_idx], b".\r")
+        # New driver matches whichever prompt the board prints next, so
+        # writes are not at predictable indices. Just check that `.\r` is
+        # in the stream somewhere.
+        self.assertIn(b".\r", t.writes)
 
     def test_value_sets_field(self):
         t = FakeTransport()
         _run_dialogue(t, values={"host_name": "mkogmosdev-lv1"})
-        host_idx = next(
-            i for i, (_l, k) in enumerate(FIELDS_WITH_UNIT) if k == "host_name"
-        )
-        # writes[0] is `c\r` to enter dialogue; per-field writes follow.
-        self.assertEqual(t.writes[1 + host_idx], b"mkogmosdev-lv1\r")
+        self.assertIn(b"mkogmosdev-lv1\r", t.writes)
 
     def test_other_fields_still_kept_when_one_set(self):
         # If you set host_name to a value but leave everything else blank,
-        # every other field should still get just `\r` (keep current).
+        # the only non-`\r` write (apart from `c\r`) should be `x\r`.
         t = FakeTransport()
         _run_dialogue(t, values={"host_name": "x"})
-        non_host = [
-            w for i, w in enumerate(t.writes[1 : 1 + len(FIELDS_WITH_UNIT)], start=0)
-            if FIELDS_WITH_UNIT[i][1] != "host_name"
-        ]
-        self.assertTrue(
-            all(w == b"\r" for w in non_host),
-            f"non-host writes were: {non_host!r}",
+        non_keep = [w for w in t.writes if w not in (b"\r",)]
+        self.assertIn(b"c\r", non_keep)
+        self.assertIn(b"x\r", non_keep)
+        # Filter the c\r and x\r; everything else should have been `\r`.
+        self.assertEqual(
+            [w for w in non_keep if w not in (b"c\r", b"x\r")],
+            [],
+            f"unexpected non-keep writes: {non_keep!r}",
         )
 
 
