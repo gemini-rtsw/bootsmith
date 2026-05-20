@@ -10,7 +10,10 @@
               <input type="hidden" name="name" value="{{ p.name }}">
               <button type="submit" class="primary">{{ p.name }}</button>
             </form>
-            <span class="meta">{{ p.wti_host }}:{{ p.wti_port }} &mdash; {{ p.loader_hint }}</span>
+            <span class="meta">
+              {{ p.wti_host }}:{{ p.wti_port }} &mdash;
+              {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
+            </span>
             <button type="button"
                     class="edit-toggle"
                     onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
@@ -31,16 +34,19 @@
             <div class="grid">
               <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
               <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
-              <label>Loader hint
-                <select name="loader_hint">
-                  <option value="auto"    {% if p.loader_hint == "auto" %}selected{% endif %}>auto-detect</option>
-                  <option value="ppcbug"  {% if p.loader_hint == "ppcbug" %}selected{% endif %}>PPCBug</option>
-                  <option value="vxworks" {% if p.loader_hint == "vxworks" %}selected{% endif %}>VxWorks / Tornado</option>
+              <label>Loader
+                <select name="loader_hint" required>
+                  {% if p.loader_hint not in loader_labels %}
+                    <option value="" selected disabled>-- choose --</option>
+                  {% endif %}
+                  {% for value, label in loader_labels.items() %}
+                    <option value="{{ value }}" {% if p.loader_hint == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
                 </select>
               </label>
             </div>
-            <h4>Boot params (VxWorks)</h4>
-            {{ boot_param_fields(p.boot_params) }}
+            <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
+            {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
             <div class="row">
               <button type="submit" class="primary">Save</button>
             </div>
@@ -54,26 +60,56 @@
 
   <details class="new-profile">
     <summary>Add target</summary>
-    <form hx-post="/profiles" hx-target="#main" hx-swap="innerHTML">
+    <form hx-post="/profiles" hx-target="#main" hx-swap="innerHTML" id="new-target-form">
       <h4>Connection</h4>
       <div class="grid">
         <label>Name <input name="name" required placeholder="MCS"></label>
         <label>WTI host <input name="wti_host" required placeholder="10.1.5.85"></label>
         <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" placeholder="2308"></label>
-        <label>Loader hint
-          <select name="loader_hint">
-            <option value="auto" selected>auto-detect</option>
-            <option value="ppcbug">PPCBug</option>
-            <option value="vxworks">VxWorks / Tornado</option>
+        <label>Loader
+          <select name="loader_hint" required id="new-loader-select">
+            <option value="" selected disabled>-- choose --</option>
+            {% for value, label in loader_labels.items() %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
           </select>
         </label>
       </div>
-      <h4>Boot params (VxWorks)</h4>
-      <p class="hint">Leave blank what doesn't apply. You can edit these later.</p>
-      {{ boot_param_fields({}) }}
+      <div id="new-target-params">
+        <p class="hint">Choose a loader to see its boot-param fields.</p>
+      </div>
       <div class="row">
         <button type="submit" class="primary">Save</button>
       </div>
     </form>
+
+    {# Hidden templates: one block per loader, swapped into #new-target-params on select. #}
+    <template id="new-params-vxworks">
+      <h4>Boot params (VxWorks)</h4>
+      <p class="hint">Leave blank what doesn't apply. You can edit these later.</p>
+      {{ boot_param_fields("vxworks", schemas.get("vxworks", ()), {}) }}
+    </template>
+    <template id="new-params-ppcbug">
+      <h4>Boot params (RTEMS / PPC)</h4>
+      <p class="hint">PPCBug NIOT fields. Leave blank what doesn't apply.</p>
+      {{ boot_param_fields("ppcbug", schemas.get("ppcbug", ()), {}) }}
+    </template>
   </details>
 </section>
+
+<script>
+  (function () {
+    const sel = document.getElementById("new-loader-select");
+    const target = document.getElementById("new-target-params");
+    if (!sel || !target) return;
+    sel.addEventListener("change", () => {
+      const tpl = document.getElementById("new-params-" + sel.value);
+      if (tpl) {
+        target.innerHTML = "";
+        target.appendChild(tpl.content.cloneNode(true));
+      } else {
+        target.innerHTML = '<p class="hint">No fields defined for that loader yet.</p>';
+      }
+    });
+  })();
+</script>

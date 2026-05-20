@@ -1,24 +1,7 @@
-{# Macro: render the editable VxWorks boot-param fields. Keys must match
-   bootsmith.vxworks.FIELDS_WITH_UNIT. #}
-{% macro boot_param_fields(values) %}
+{# Macro: render editable boot-param fields for the given loader. #}
+{% macro boot_param_fields(loader, fields, values) %}
+{% if fields %}
 <div class="grid params-grid">
-  {% set fields = [
-    ('boot device',            'boot_device'),
-    ('unit number',            'unit_number'),
-    ('processor number',       'processor_number'),
-    ('host name',              'host_name'),
-    ('file name',              'file_name'),
-    ('inet on ethernet (e)',   'inet_on_ethernet'),
-    ('inet on backplane (b)',  'inet_on_backplane'),
-    ('host inet (h)',          'host_inet'),
-    ('gateway inet (g)',       'gateway_inet'),
-    ('user (u)',               'user'),
-    ('ftp password (pw)',      'ftp_password'),
-    ('flags (f)',              'flags'),
-    ('target name (tn)',       'target_name'),
-    ('startup script (s)',     'startup_script'),
-    ('other (o)',              'other'),
-  ] %}
   {% for label, key in fields %}
     <label>
       <span class="field-label">{{ label }}</span>
@@ -26,4 +9,7 @@
     </label>
   {% endfor %}
 </div>
+{% else %}
+<p class="hint">No boot-param fields for loader {{ loader }} yet.</p>
+{% endif %}
 {% endmacro %}

@@ -1,4 +1,4 @@
-"""VxWorks boot ROM driver.
+"""VxWorks boot ROM driver. Schema also re-exported as VXWORKS_FIELDS.
 
 Talks to the interactive boot ROM at the `[VxWorks Boot]:` prompt to:
 

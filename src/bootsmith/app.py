@@ -6,8 +6,21 @@ from dataclasses import asdict
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 from . import profiles as profiles_mod
+from . import schemas as schemas_mod
 from . import vxworks as vxworks_mod
 from .session import SessionManager
+
+
+VALID_LOADERS = set(schemas_mod.LOADER_LABELS.keys())
+
+
+def _render_profile_list():
+    return render_template(
+        "_profile_list.html",
+        profiles=profiles_mod.list_profiles(),
+        schemas=schemas_mod.SCHEMAS,
+        loader_labels=schemas_mod.LOADER_LABELS,
+    )
 
 
 def create_app() -> Flask:
@@ -16,11 +29,16 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html", profiles=profiles_mod.list_profiles())
+        return render_template(
+            "index.html",
+            profiles=profiles_mod.list_profiles(),
+            schemas=schemas_mod.SCHEMAS,
+            loader_labels=schemas_mod.LOADER_LABELS,
+        )
 
     @app.get("/profiles")
     def list_profiles_route():
-        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
+        return _render_profile_list()
 
     @app.post("/profiles")
     def create_profile():
@@ -30,11 +48,13 @@ def create_app() -> Flask:
             port = int(request.form.get("wti_port") or "")
         except ValueError:
             return _error("wti_port must be an integer"), 400
-        loader_hint = request.form.get("loader_hint", "auto")
+        loader_hint = (request.form.get("loader_hint") or "").strip()
         if not name or not host:
             return _error("name and wti_host are required"), 400
-        if loader_hint not in {"auto", "ppcbug", "vxworks"}:
-            return _error("loader_hint must be auto, ppcbug, or vxworks"), 400
+        if loader_hint not in VALID_LOADERS:
+            return _error(
+                f"loader is required; pick one of {sorted(VALID_LOADERS)}"
+            ), 400
         if profiles_mod.get_profile(name) is not None:
             return _error(f"profile {name!r} already exists"), 409
         profile = profiles_mod.Profile(
@@ -42,15 +62,15 @@ def create_app() -> Flask:
             wti_host=host,
             wti_port=port,
             loader_hint=loader_hint,
-            boot_params=_collect_boot_params(request.form),
+            boot_params=_collect_boot_params(request.form, loader_hint),
         )
         profiles_mod.save_profile(profile)
-        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
+        return _render_profile_list()
 
     @app.post("/profiles/<name>/delete")
     def delete_profile_route(name: str):
         profiles_mod.delete_profile(name)
-        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
+        return _render_profile_list()
 
     @app.post("/profiles/<name>/update")
     def update_profile_route(name: str):
@@ -62,22 +82,25 @@ def create_app() -> Flask:
             port = int(request.form.get("wti_port") or existing.wti_port)
         except ValueError:
             return _error("wti_port must be an integer"), 400
-        loader_hint = request.form.get("loader_hint", existing.loader_hint)
-        if loader_hint not in {"auto", "ppcbug", "vxworks"}:
-            return _error("loader_hint must be auto, ppcbug, or vxworks"), 400
+        loader_hint = (request.form.get("loader_hint") or existing.loader_hint).strip()
+        if loader_hint not in VALID_LOADERS:
+            return _error(
+                f"loader is required; pick one of {sorted(VALID_LOADERS)}"
+            ), 400
         if not host:
             return _error("wti_host cannot be empty"), 400
+        loader_changed = loader_hint != existing.loader_hint
         existing.wti_host = host
         existing.wti_port = port
         existing.loader_hint = loader_hint
-        # Only overwrite boot_params if any param_* field is present in the
-        # form. The compact edit dialog (connection details only) leaves
-        # them alone; the full edit form submits them.
-        new_params = _collect_boot_params(request.form)
-        if new_params or any(k.startswith("param_") for k in request.form.keys()):
+        # Overwrite boot_params if the form submitted any param_* field,
+        # or if the loader changed (old fields don't apply to new loader).
+        new_params = _collect_boot_params(request.form, loader_hint)
+        has_param_fields = any(k.startswith("param_") for k in request.form.keys())
+        if has_param_fields or loader_changed:
             existing.boot_params = new_params
         profiles_mod.save_profile(existing)
-        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
+        return _render_profile_list()
 
     @app.post("/session/open")
     def session_open():
@@ -104,7 +127,7 @@ def create_app() -> Flask:
     def session_close():
         sessions: SessionManager = app.config["sessions"]
         sessions.close()
-        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
+        return _render_profile_list()
 
     @app.get("/session/status")
     def session_status():
@@ -212,7 +235,7 @@ def create_app() -> Flask:
         vxworks_mod.boot(sess.transport)
         # Close the session — the board is leaving the loader.
         sessions.close()
-        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
+        return _render_profile_list()
 
     @app.post("/session/send")
     def session_send():
@@ -252,13 +275,15 @@ def create_app() -> Flask:
     return app
 
 
-def _collect_boot_params(form) -> dict[str, str]:
+def _collect_boot_params(form, loader: str) -> dict[str, str]:
     """Pull `param_<key>` form fields into a {key: value} dict.
 
-    Drops empty fields so the saved JSON stays small.
+    Only keys that belong to the chosen loader's schema are kept, so
+    switching loader doesn't bring along stale fields from the other.
+    Empty values are dropped.
     """
     out: dict[str, str] = {}
-    for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
+    for _label, key in schemas_mod.fields_for(loader):
         v = form.get(f"param_{key}")
         if v is None:
             continue
