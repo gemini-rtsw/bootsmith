@@ -5,14 +5,24 @@ boards over a WTI console server.
 
 ## Run
 
+Bootsmith needs Python 3.10 or newer and Flask. No virtualenv required.
+
 ```sh
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-bootsmith
+# install Flask once (user-local, no root)
+python3 -m pip install --user flask
+
+# run the app from the source tree
+PYTHONPATH=src python3 -m bootsmith --port 5050
 ```
 
-Then open http://127.0.0.1:5000/.
+Then open http://127.0.0.1:5050/.
+
+If your default `python3` is older than 3.10, use the explicit version, e.g.:
+
+```sh
+python3.11 -m pip install --user flask
+PYTHONPATH=src python3.11 -m bootsmith --port 5050
+```
 
 ## How it works
 
