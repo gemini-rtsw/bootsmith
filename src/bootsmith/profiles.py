@@ -27,7 +27,7 @@ class Profile:
     loader_hint: str = "auto"
     prompts: dict = field(default_factory=dict)
     banners: dict = field(default_factory=dict)
-    last_params: dict = field(default_factory=dict)
+    boot_params: dict = field(default_factory=dict)
     notes: str = ""
 
 
@@ -77,6 +77,8 @@ def delete_profile(name: str) -> bool:
 
 def _load_path(path: Path) -> Profile:
     data = json.loads(path.read_text())
+    # Older profiles used `last_params`; accept either key.
+    boot_params = data.get("boot_params") or data.get("last_params") or {}
     return Profile(
         name=data["name"],
         wti_host=data["wti_host"],
@@ -84,7 +86,7 @@ def _load_path(path: Path) -> Profile:
         loader_hint=data.get("loader_hint", "auto"),
         prompts=data.get("prompts", {}),
         banners=data.get("banners", {}),
-        last_params=data.get("last_params", {}),
+        boot_params=boot_params,
         notes=data.get("notes", ""),
     )
 

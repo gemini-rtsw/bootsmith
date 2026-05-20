@@ -1,3 +1,4 @@
+{% from "_profile_form_fields.html" import boot_param_fields %}
 <section class="profiles">
   <h2>Targets</h2>
   {% if profiles %}
@@ -22,20 +23,27 @@
             </form>
           </div>
           <form id="edit-{{ p.name }}"
-                class="grid edit-form hidden"
+                class="edit-form hidden"
                 hx-post="/profiles/{{ p.name }}/update"
                 hx-target="#main"
                 hx-swap="innerHTML">
-            <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
-            <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
-            <label>Loader hint
-              <select name="loader_hint">
-                <option value="auto"    {% if p.loader_hint == "auto" %}selected{% endif %}>auto-detect</option>
-                <option value="ppcbug"  {% if p.loader_hint == "ppcbug" %}selected{% endif %}>PPCBug</option>
-                <option value="vxworks" {% if p.loader_hint == "vxworks" %}selected{% endif %}>VxWorks / Tornado</option>
-              </select>
-            </label>
-            <button type="submit">Save</button>
+            <h4>Connection</h4>
+            <div class="grid">
+              <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
+              <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
+              <label>Loader hint
+                <select name="loader_hint">
+                  <option value="auto"    {% if p.loader_hint == "auto" %}selected{% endif %}>auto-detect</option>
+                  <option value="ppcbug"  {% if p.loader_hint == "ppcbug" %}selected{% endif %}>PPCBug</option>
+                  <option value="vxworks" {% if p.loader_hint == "vxworks" %}selected{% endif %}>VxWorks / Tornado</option>
+                </select>
+              </label>
+            </div>
+            <h4>Boot params (VxWorks)</h4>
+            {{ boot_param_fields(p.boot_params) }}
+            <div class="row">
+              <button type="submit" class="primary">Save</button>
+            </div>
           </form>
         </li>
       {% endfor %}
@@ -46,18 +54,26 @@
 
   <details class="new-profile">
     <summary>Add target</summary>
-    <form hx-post="/profiles" hx-target="#main" hx-swap="innerHTML" class="grid">
-      <label>Name <input name="name" required placeholder="MCS"></label>
-      <label>WTI host <input name="wti_host" required placeholder="wti-rack3.example.org"></label>
-      <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" placeholder="3308"></label>
-      <label>Loader hint
-        <select name="loader_hint">
-          <option value="auto" selected>auto-detect</option>
-          <option value="ppcbug">PPCBug</option>
-          <option value="vxworks">VxWorks / Tornado</option>
-        </select>
-      </label>
-      <button type="submit">Save</button>
+    <form hx-post="/profiles" hx-target="#main" hx-swap="innerHTML">
+      <h4>Connection</h4>
+      <div class="grid">
+        <label>Name <input name="name" required placeholder="MCS"></label>
+        <label>WTI host <input name="wti_host" required placeholder="10.1.5.85"></label>
+        <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" placeholder="2308"></label>
+        <label>Loader hint
+          <select name="loader_hint">
+            <option value="auto" selected>auto-detect</option>
+            <option value="ppcbug">PPCBug</option>
+            <option value="vxworks">VxWorks / Tornado</option>
+          </select>
+        </label>
+      </div>
+      <h4>Boot params (VxWorks)</h4>
+      <p class="hint">Leave blank what doesn't apply. You can edit these later.</p>
+      {{ boot_param_fields({}) }}
+      <div class="row">
+        <button type="submit" class="primary">Save</button>
+      </div>
     </form>
   </details>
 </section>

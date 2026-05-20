@@ -44,7 +44,24 @@ class SessionManager:
         watcher.start()
         with self._lock:
             self._session = Session(profile=profile, transport=transport, watcher=watcher)
-            return self._session
+
+        # Auto-prompt: after a short delay (long enough for IAC negotiation
+        # to settle), send CR + run the watcher's force_prompt. If the board
+        # is already halted at a loader prompt, this surfaces it immediately
+        # so the user sees something instead of a blank pane.
+        def _bump():
+            import time as _t
+
+            _t.sleep(0.7)
+            try:
+                transport.write(b"\r")
+                _t.sleep(0.25)
+                watcher.force_prompt()
+            except Exception:
+                pass
+
+        threading.Thread(target=_bump, name="auto-prompt", daemon=True).start()
+        return self._session
 
     def close(self) -> None:
         with self._lock:

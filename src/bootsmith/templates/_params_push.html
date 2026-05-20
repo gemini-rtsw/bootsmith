@@ -1,0 +1,35 @@
+<section class="params" id="params">
+  <h3>Saved boot params for {{ profile.name }}</h3>
+  {% if profile.boot_params %}
+    <p class="hint">These values will be written to the board. Edit the profile to change them.</p>
+    <table class="params-table">
+      <tbody>
+        {% for label, key in fields %}
+          {% if profile.boot_params.get(key) %}
+            <tr><th>{{ label }}</th><td><code>{{ profile.boot_params[key] }}</code></td></tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="controls">
+      <form hx-post="/params/push" hx-target="#params" hx-swap="outerHTML"
+            hx-confirm="Push these {{ profile.boot_params|length }} param(s) to {{ profile.name }}?"
+            class="inline">
+        <button type="submit" class="primary">Push to board</button>
+      </form>
+      <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
+        <button type="submit" class="danger">Disconnect</button>
+      </form>
+    </div>
+  {% else %}
+    <div class="error">
+      <strong>This profile has no boot params saved.</strong>
+      Disconnect, click <em>Edit</em> on the profile, and fill in the boot fields.
+    </div>
+    <div class="controls">
+      <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
+        <button type="submit" class="danger">Disconnect</button>
+      </form>
+    </div>
+  {% endif %}
+</section>

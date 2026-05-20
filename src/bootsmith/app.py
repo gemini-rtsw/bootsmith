@@ -38,7 +38,11 @@ def create_app() -> Flask:
         if profiles_mod.get_profile(name) is not None:
             return _error(f"profile {name!r} already exists"), 409
         profile = profiles_mod.Profile(
-            name=name, wti_host=host, wti_port=port, loader_hint=loader_hint
+            name=name,
+            wti_host=host,
+            wti_port=port,
+            loader_hint=loader_hint,
+            boot_params=_collect_boot_params(request.form),
         )
         profiles_mod.save_profile(profile)
         return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
@@ -63,11 +67,15 @@ def create_app() -> Flask:
             return _error("loader_hint must be auto, ppcbug, or vxworks"), 400
         if not host:
             return _error("wti_host cannot be empty"), 400
-        # Keep last_params, banners, prompts, notes — only the connection
-        # details and loader hint are editable from the UI for now.
         existing.wti_host = host
         existing.wti_port = port
         existing.loader_hint = loader_hint
+        # Only overwrite boot_params if any param_* field is present in the
+        # form. The compact edit dialog (connection details only) leaves
+        # them alone; the full edit form submits them.
+        new_params = _collect_boot_params(request.form)
+        if new_params or any(k.startswith("param_") for k in request.form.keys()):
+            existing.boot_params = new_params
         profiles_mod.save_profile(existing)
         return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
 
@@ -155,7 +163,21 @@ def create_app() -> Flask:
         )
 
     @app.get("/params")
-    def params_get():
+    def params_panel():
+        """Show the saved profile params with a 'Push to board' button."""
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        return render_template(
+            "_params_push.html",
+            profile=sess.profile,
+            fields=vxworks_mod.FIELDS_WITH_UNIT,
+        )
+
+    @app.post("/params/push")
+    def params_push():
+        """Push the saved profile's boot_params to the board, then verify."""
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
         if sess is None:
@@ -165,46 +187,19 @@ def create_app() -> Flask:
             return _error(f"not at a loader prompt (state={ws.state})"), 409
         if ws.loader != "vxworks":
             return _error(f"loader {ws.loader!r} not supported yet"), 400
-        result = vxworks_mod.read_params(sess.transport)
-        fields = [
-            (label, key, result.params.get(key, sess.profile.last_params.get(key, "")))
-            for label, key in vxworks_mod.FIELDS_WITH_UNIT
-        ]
-        return render_template(
-            "_params_form.html",
-            fields=fields,
-            current=result.params,
-        )
-
-    @app.post("/params")
-    def params_post():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
-        if sess is None:
-            return _error("no session open"), 404
-        if sess.watcher.status().loader != "vxworks":
-            return _error("only vxworks supported in this slice"), 400
-        new_values: dict[str, str] = {}
-        for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
-            v = request.form.get(key)
-            if v is not None:
-                new_values[key] = v.strip()
-        vxworks_mod.write_params(sess.transport, new_values)
-        # Verify by reading back.
+        values = dict(sess.profile.boot_params)
+        vxworks_mod.write_params(sess.transport, values)
         verify = vxworks_mod.read_params(sess.transport)
         diff = []
         for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
-            want = new_values.get(key, "")
+            want = values.get(key, "")
             got = verify.params.get(key, "")
             if want and want != got:
                 diff.append({"key": key, "want": want, "got": got})
-        # Persist what we wrote so the form pre-fills next time.
-        sess.profile.last_params = {k: v for k, v in new_values.items() if v}
-        profiles_mod.save_profile(sess.profile)
         return render_template(
             "_params_verify.html",
             current=verify.params,
-            wrote=new_values,
+            wrote=values,
             diff=diff,
         )
 
@@ -232,6 +227,22 @@ def create_app() -> Flask:
         return ("", 204)
 
     return app
+
+
+def _collect_boot_params(form) -> dict[str, str]:
+    """Pull `param_<key>` form fields into a {key: value} dict.
+
+    Drops empty fields so the saved JSON stays small.
+    """
+    out: dict[str, str] = {}
+    for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
+        v = form.get(f"param_{key}")
+        if v is None:
+            continue
+        v = v.strip()
+        if v:
+            out[key] = v
+    return out
 
 
 def _error(msg: str) -> Response:
