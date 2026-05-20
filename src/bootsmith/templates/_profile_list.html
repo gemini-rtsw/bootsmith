@@ -4,16 +4,38 @@
     <ul class="profile-list">
       {% for p in profiles %}
         <li>
-          <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML" class="row">
-            <input type="hidden" name="name" value="{{ p.name }}">
-            <button type="submit" class="primary">{{ p.name }}</button>
+          <div class="row">
+            <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML" class="inline">
+              <input type="hidden" name="name" value="{{ p.name }}">
+              <button type="submit" class="primary">{{ p.name }}</button>
+            </form>
             <span class="meta">{{ p.wti_host }}:{{ p.wti_port }} &mdash; {{ p.loader_hint }}</span>
             <button type="button"
-                    class="danger"
-                    hx-post="/profiles/{{ p.name }}/delete"
-                    hx-target="#main"
-                    hx-swap="innerHTML"
-                    hx-confirm="Delete profile {{ p.name }}?">Delete</button>
+                    class="edit-toggle"
+                    onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
+            <form hx-post="/profiles/{{ p.name }}/delete"
+                  hx-target="#main"
+                  hx-swap="innerHTML"
+                  hx-confirm="Delete profile {{ p.name }}?"
+                  class="inline">
+              <button type="submit" class="danger">Delete</button>
+            </form>
+          </div>
+          <form id="edit-{{ p.name }}"
+                class="grid edit-form hidden"
+                hx-post="/profiles/{{ p.name }}/update"
+                hx-target="#main"
+                hx-swap="innerHTML">
+            <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
+            <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
+            <label>Loader hint
+              <select name="loader_hint">
+                <option value="auto"    {% if p.loader_hint == "auto" %}selected{% endif %}>auto-detect</option>
+                <option value="ppcbug"  {% if p.loader_hint == "ppcbug" %}selected{% endif %}>PPCBug</option>
+                <option value="vxworks" {% if p.loader_hint == "vxworks" %}selected{% endif %}>VxWorks / Tornado</option>
+              </select>
+            </label>
+            <button type="submit">Save</button>
           </form>
         </li>
       {% endfor %}
@@ -27,7 +49,7 @@
     <form hx-post="/profiles" hx-target="#main" hx-swap="innerHTML" class="grid">
       <label>Name <input name="name" required placeholder="MCS"></label>
       <label>WTI host <input name="wti_host" required placeholder="wti-rack3.example.org"></label>
-      <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" placeholder="2004"></label>
+      <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" placeholder="3308"></label>
       <label>Loader hint
         <select name="loader_hint">
           <option value="auto" selected>auto-detect</option>

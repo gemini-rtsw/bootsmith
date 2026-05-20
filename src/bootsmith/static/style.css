@@ -186,3 +186,16 @@ button.danger {
   font-size: 0.85rem;
 }
 .banner.hidden { display: none; }
+
+.edit-form {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+}
+.edit-form.hidden { display: none; }
+.edit-toggle {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+}

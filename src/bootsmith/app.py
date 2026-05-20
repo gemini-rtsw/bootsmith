@@ -47,6 +47,29 @@ def create_app() -> Flask:
         profiles_mod.delete_profile(name)
         return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
 
+    @app.post("/profiles/<name>/update")
+    def update_profile_route(name: str):
+        existing = profiles_mod.get_profile(name)
+        if existing is None:
+            return _error(f"no such profile: {name!r}"), 404
+        host = (request.form.get("wti_host") or existing.wti_host).strip()
+        try:
+            port = int(request.form.get("wti_port") or existing.wti_port)
+        except ValueError:
+            return _error("wti_port must be an integer"), 400
+        loader_hint = request.form.get("loader_hint", existing.loader_hint)
+        if loader_hint not in {"auto", "ppcbug", "vxworks"}:
+            return _error("loader_hint must be auto, ppcbug, or vxworks"), 400
+        if not host:
+            return _error("wti_host cannot be empty"), 400
+        # Keep last_params, banners, prompts, notes — only the connection
+        # details and loader hint are editable from the UI for now.
+        existing.wti_host = host
+        existing.wti_port = port
+        existing.loader_hint = loader_hint
+        profiles_mod.save_profile(existing)
+        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
+
     @app.post("/session/open")
     def session_open():
         name = (request.form.get("name") or "").strip()
