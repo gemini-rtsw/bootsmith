@@ -226,6 +226,29 @@ def create_app() -> Flask:
         sess.transport.write(data)
         return ("", 204)
 
+    @app.post("/session/key")
+    def session_key():
+        """Send raw bytes from the terminal input.
+
+        The browser posts a base64-encoded byte string in `b`. This is the
+        path used by the interactive terminal box; one POST per keystroke or
+        per small batch of bytes (the browser may coalesce fast typing).
+        """
+        import base64
+
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        b64 = request.form.get("b", "")
+        try:
+            data = base64.b64decode(b64)
+        except Exception:
+            return _error("bad base64"), 400
+        if data:
+            sess.transport.write(data)
+        return ("", 204)
+
     return app
 
 

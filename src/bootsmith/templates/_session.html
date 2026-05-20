@@ -16,19 +16,31 @@
 
   <div id="status-banner" class="banner hidden"></div>
 
-  <pre id="serial" class="serial" aria-live="polite"></pre>
+  <div class="terminal">
+    <pre id="serial" class="serial" aria-live="polite"></pre>
+    <div class="terminal-input-row">
+      <span class="terminal-prompt">&gt;</span>
+      <input id="terminal-input"
+             class="terminal-input"
+             placeholder="type a command and press Enter (terminal mode)"
+             autocomplete="off"
+             autocorrect="off"
+             autocapitalize="off"
+             spellcheck="false">
+    </div>
+  </div>
 
   <div class="controls">
-    <form hx-post="/session/send" hx-swap="none" class="row">
-      <input name="data" placeholder="send raw (use \r for CR, \n for LF)" autocomplete="off">
-      <button type="submit">Send</button>
-    </form>
     <form hx-post="/session/force-prompt" hx-swap="none" class="inline">
       <button type="submit" title="Sends CR and tries to match a loader prompt — use if the board is already halted">Force prompt</button>
     </form>
     <form hx-post="/session/rearm" hx-swap="none" class="inline" id="rearm-form" style="display:none">
       <button type="submit" class="primary" title="Reset watcher to waiting state so you can reboot again">Re-arm</button>
     </form>
+    <label class="terminal-mode-toggle">
+      <input type="checkbox" id="terminal-raw" />
+      <span title="Send each keystroke immediately. When off, sends the line on Enter.">raw key mode</span>
+    </label>
   </div>
 
   <p class="hint">

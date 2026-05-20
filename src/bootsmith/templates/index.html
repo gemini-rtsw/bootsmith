@@ -113,6 +113,102 @@
         } catch (_) {}
       }
 
+      function sendBytes(bytes) {
+        // bytes can be a string (Latin-1) or Uint8Array.
+        let bin;
+        if (typeof bytes === "string") {
+          bin = bytes;
+        } else {
+          bin = "";
+          for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        }
+        const b64 = btoa(bin);
+        const form = new FormData();
+        form.append("b", b64);
+        fetch("/session/key", { method: "POST", body: form });
+      }
+
+      function bindTerminal() {
+        const input = document.getElementById("terminal-input");
+        const rawToggle = document.getElementById("terminal-raw");
+        if (!input || input.__bootsmithBound) return;
+        input.__bootsmithBound = true;
+
+        input.addEventListener("keydown", (e) => {
+          const raw = rawToggle && rawToggle.checked;
+          // Raw mode: send every keystroke as it happens, including arrows
+          // and control chars. Otherwise: buffer the line, send on Enter.
+          if (raw) {
+            // Don't double-send printable chars — let the default handler
+            // put them in the box AND mirror them to the wire below.
+            if (e.key === "Enter") {
+              e.preventDefault();
+              sendBytes("\r");
+              input.value = "";
+              return;
+            }
+            if (e.key === "Backspace") {
+              e.preventDefault();
+              sendBytes("\x7f"); // DEL — most VxWorks/PPCBug treat this as erase
+              input.value = input.value.slice(0, -1);
+              return;
+            }
+            if (e.key === "Tab") {
+              e.preventDefault();
+              sendBytes("\t");
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              sendBytes("\x1b");
+              return;
+            }
+            // Ctrl-<letter>
+            if (e.ctrlKey && e.key.length === 1) {
+              const code = e.key.toUpperCase().charCodeAt(0);
+              if (code >= 0x40 && code <= 0x5f) {
+                e.preventDefault();
+                sendBytes(String.fromCharCode(code - 0x40));
+                return;
+              }
+            }
+            // Single printable char.
+            if (e.key.length === 1 && !e.metaKey && !e.altKey) {
+              e.preventDefault();
+              sendBytes(e.key);
+              input.value += e.key;
+              return;
+            }
+          } else {
+            // Line mode: just intercept Enter and Ctrl-C / Ctrl-D for convenience.
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const line = input.value;
+              sendBytes(line + "\r");
+              input.value = "";
+              return;
+            }
+            if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
+              e.preventDefault();
+              sendBytes("\x03");
+              return;
+            }
+            if (e.ctrlKey && (e.key === "d" || e.key === "D")) {
+              e.preventDefault();
+              sendBytes("\x04");
+              return;
+            }
+          }
+        });
+        // Click-to-focus on the serial pane focuses the input — feels more
+        // terminal-like than clicking the tiny input box.
+        const pre = document.getElementById("serial");
+        if (pre) {
+          pre.addEventListener("click", () => input.focus());
+        }
+        input.focus();
+      }
+
       function start(profile) {
         stop();
         lastProfile = profile;
@@ -132,6 +228,7 @@
         };
         poll();
         pollTimer = setInterval(poll, 500);
+        bindTerminal();
       }
 
       function stop() {
