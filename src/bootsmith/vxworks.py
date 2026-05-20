@@ -112,49 +112,72 @@ def read_params(transport: WTITransport, timeout: float = 4.0) -> ReadResult:
 def write_params(
     transport: WTITransport,
     values: dict[str, str],
-    timeout_per_field: float = 2.0,
+    timeout_per_field: float = 4.0,
 ) -> WriteResult:
     """Send `c` and walk the interactive dialogue, writing every known field.
 
     `values` is keyed by the schema key (`host_name`, `inet_on_ethernet`, ...).
-    Any field not in `values` is left at its current setting by sending an
-    empty Enter at that prompt.
+
+    Semantics per field:
+        - Missing key OR empty string -> send Enter (keep current).
+        - Literal "." (a single dot)  -> send `.\r` (clear the field on board).
+        - Anything else                -> send value + Enter (set to that).
+
+    The dialogue prints each prompt with a trailing ":" then a space, e.g.:
+
+        boot device          : geisc
+
+    On a blank line it just prints "label : <current>" and waits. So we wait
+    for the exact label of the next field plus ":" before sending its value,
+    and we hard-anchor on the next-prompt boundary so we never overrun the
+    dialogue and have our verify "p" leak into a field. After the last field
+    the board returns to "[VxWorks Boot]: " — we wait for that explicitly
+    before declaring write_params complete.
     """
     raw_buf = bytearray()
     fields_written: list[str] = []
 
-    # Subscribe to the byte stream BEFORE sending `c` so we don't miss the
-    # first field prompt.
     q = transport.subscribe()
     try:
         transport.write(b"c\r")
         for label, key in FIELDS_WITH_UNIT:
-            # Read until we see "label ... :" (the dialogue prompt for this
-            # field) or until timeout. The dialogue prints "label  (current_value): "
-            # but the trailing `:` is the reliable anchor.
-            chunk = _read_until(
-                q,
-                pattern=re.compile(re.escape(label.encode()) + rb"[^:\r\n]*:\s*$"),
-                timeout=timeout_per_field,
-                accumulator=raw_buf,
+            # Wait for the EXACT label followed by ":" near end-of-buffer.
+            # Some firmware versions display the current value after the
+            # colon and then wait; others just show the colon. Either way,
+            # ": " followed by no further newline is the anchor.
+            pat = re.compile(
+                rb"(^|[\r\n])" + re.escape(label.encode())
+                + rb"[^\r\n:]*:\s*([^\r\n]*)$"
             )
-            if chunk is None:
-                _log(f"timed out waiting for prompt for {label!r}; aborting write")
+            if _read_until(q, pat, timeout=timeout_per_field, accumulator=raw_buf) is None:
+                _log(
+                    f"timed out waiting for prompt for {label!r}; aborting write"
+                )
+                # Try to bail out cleanly by sending ^D (quit).
+                try:
+                    transport.write(b"\x04")
+                except Exception:
+                    pass
                 break
-            new_value = values.get(key, "")
-            if new_value:
-                transport.write(new_value.encode() + b"\r")
+
+            raw_value = values.get(key, "")
+            if raw_value == "":
+                # Keep current.
+                transport.write(b"\r")
+            elif raw_value == ".":
+                transport.write(b".\r")
                 fields_written.append(key)
             else:
-                # Empty -> just Enter, which keeps existing value.
-                transport.write(b"\r")
-        # After the last field the boot ROM returns to the prompt. Drain to it.
-        _read_until(
-            q,
-            pattern=PROMPT_RE,
-            timeout=2.0,
-            accumulator=raw_buf,
-        )
+                transport.write(raw_value.encode() + b"\r")
+                fields_written.append(key)
+
+        # After the last field, the boot ROM returns to the [VxWorks Boot]:
+        # prompt. Wait for it explicitly so any follow-up command (like the
+        # verify `p`) goes to the prompt, not into the dialogue.
+        if _read_until(q, PROMPT_RE, timeout=4.0, accumulator=raw_buf) is None:
+            _log("did not see [VxWorks Boot]: after dialogue; sending CR to nudge")
+            transport.write(b"\r")
+            _read_until(q, PROMPT_RE, timeout=2.0, accumulator=raw_buf)
     finally:
         transport.unsubscribe(q)
 

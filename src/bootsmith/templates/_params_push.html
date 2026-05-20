@@ -1,7 +1,11 @@
 <section class="params" id="params">
   <h3>Saved boot params for {{ profile.name }}</h3>
   {% if profile.boot_params %}
-    <p class="hint">These values will be written to the board. Edit the profile to change them.</p>
+    <p class="hint">
+      These values will be written to the board. Edit the profile to change them.
+      Reminder: a saved value of <code>.</code> (single dot) clears the field on the board;
+      fields not listed below are blank in the profile and will keep their current board value.
+    </p>
     <table class="params-table">
       <tbody>
         {% for label, key in fields %}

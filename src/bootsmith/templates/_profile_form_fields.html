@@ -1,6 +1,11 @@
 {# Macro: render editable boot-param fields for the given loader. #}
 {% macro boot_param_fields(loader, fields, values) %}
 {% if fields %}
+<p class="hint">
+  <strong>Blank</strong> = keep current value on the board.
+  Type <code>.</code> (a single dot) to <strong>clear</strong> the field on the board.
+  Anything else is written as-is.
+</p>
 <div class="grid params-grid">
   {% for label, key in fields %}
     <label>

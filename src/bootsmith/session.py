@@ -45,20 +45,31 @@ class SessionManager:
         with self._lock:
             self._session = Session(profile=profile, transport=transport, watcher=watcher)
 
-        # Auto-prompt: after a short delay (long enough for IAC negotiation
-        # to settle), send CR + run the watcher's force_prompt. If the board
-        # is already halted at a loader prompt, this surfaces it immediately
-        # so the user sees something instead of a blank pane.
+        # Auto-prompt: after IAC negotiation settles, try to surface the
+        # loader prompt so the user sees something immediately.
+        #
+        # First we send ^D in case the previous user left the board mid-`c`
+        # dialogue — ^D bails out of the dialogue without committing. If the
+        # board is already at the prompt, ^D is harmless. Then a CR makes
+        # the board echo the prompt. We retry once because some boards take
+        # a beat after IAC to start responding.
         def _bump():
             import time as _t
 
-            _t.sleep(0.7)
-            try:
-                transport.write(b"\r")
-                _t.sleep(0.25)
-                watcher.force_prompt()
-            except Exception:
-                pass
+            _t.sleep(0.8)
+            for delay in (0.0, 0.6):
+                if delay:
+                    _t.sleep(delay)
+                try:
+                    transport.write(b"\x04")  # ^D — quit any open c dialogue
+                    _t.sleep(0.15)
+                    transport.write(b"\r")
+                    _t.sleep(0.4)
+                    watcher.force_prompt()
+                except Exception:
+                    return
+                if watcher.status().state == "at_prompt":
+                    return
 
         threading.Thread(target=_bump, name="auto-prompt", daemon=True).start()
         return self._session
