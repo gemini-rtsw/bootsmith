@@ -1,0 +1,38 @@
+<section class="params" id="params">
+  <h3>Verification</h3>
+  {% if diff %}
+    <div class="error">
+      <strong>Some fields did not read back as expected:</strong>
+      <ul>
+        {% for d in diff %}
+          <li><code>{{ d.key }}</code>: wrote <code>{{ d.want }}</code>, read back <code>{{ d.got }}</code></li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% else %}
+    <p class="ok">All written fields read back identically.</p>
+  {% endif %}
+
+  <h4>Current values on the board</h4>
+  <table class="params-table">
+    <tbody>
+      {% for key, value in current.items() %}
+        <tr><th>{{ key }}</th><td><code>{{ value }}</code></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="controls">
+    <form hx-post="/params/boot" hx-target="#main" hx-swap="innerHTML"
+          hx-confirm="Boot the board with these params? The WTI session will close."
+          class="inline">
+      <button type="submit" class="primary">Boot (@)</button>
+    </form>
+    <form hx-get="/params" hx-target="#params" hx-swap="outerHTML" class="inline">
+      <button type="submit">Re-edit</button>
+    </form>
+    <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
+      <button type="submit" class="danger">Disconnect (leave at prompt)</button>
+    </form>
+  </div>
+</section>

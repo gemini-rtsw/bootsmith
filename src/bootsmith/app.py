@@ -6,6 +6,7 @@ from dataclasses import asdict
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 from . import profiles as profiles_mod
+from . import vxworks as vxworks_mod
 from .session import SessionManager
 
 
@@ -152,6 +153,71 @@ def create_app() -> Flask:
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @app.get("/params")
+    def params_get():
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        ws = sess.watcher.status()
+        if ws.state != "at_prompt":
+            return _error(f"not at a loader prompt (state={ws.state})"), 409
+        if ws.loader != "vxworks":
+            return _error(f"loader {ws.loader!r} not supported yet"), 400
+        result = vxworks_mod.read_params(sess.transport)
+        fields = [
+            (label, key, result.params.get(key, sess.profile.last_params.get(key, "")))
+            for label, key in vxworks_mod.FIELDS_WITH_UNIT
+        ]
+        return render_template(
+            "_params_form.html",
+            fields=fields,
+            current=result.params,
+        )
+
+    @app.post("/params")
+    def params_post():
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        if sess.watcher.status().loader != "vxworks":
+            return _error("only vxworks supported in this slice"), 400
+        new_values: dict[str, str] = {}
+        for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
+            v = request.form.get(key)
+            if v is not None:
+                new_values[key] = v.strip()
+        vxworks_mod.write_params(sess.transport, new_values)
+        # Verify by reading back.
+        verify = vxworks_mod.read_params(sess.transport)
+        diff = []
+        for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
+            want = new_values.get(key, "")
+            got = verify.params.get(key, "")
+            if want and want != got:
+                diff.append({"key": key, "want": want, "got": got})
+        # Persist what we wrote so the form pre-fills next time.
+        sess.profile.last_params = {k: v for k, v in new_values.items() if v}
+        profiles_mod.save_profile(sess.profile)
+        return render_template(
+            "_params_verify.html",
+            current=verify.params,
+            wrote=new_values,
+            diff=diff,
+        )
+
+    @app.post("/params/boot")
+    def params_boot():
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        vxworks_mod.boot(sess.transport)
+        # Close the session — the board is leaving the loader.
+        sessions.close()
+        return render_template("_profile_list.html", profiles=profiles_mod.list_profiles())
 
     @app.post("/session/send")
     def session_send():
