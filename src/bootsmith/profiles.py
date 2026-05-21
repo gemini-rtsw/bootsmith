@@ -75,6 +75,27 @@ def delete_profile(name: str) -> bool:
     return False
 
 
+def rename_profile(old_name: str, new_name: str) -> None:
+    """Move profile JSON from old_name to new_name. Raises if the source
+    doesn't exist or the target already does.
+    """
+    src = _profile_path(old_name)
+    dst = _profile_path(new_name)
+    if not src.exists():
+        raise FileNotFoundError(f"no profile named {old_name!r}")
+    if src == dst:
+        return
+    if dst.exists():
+        raise FileExistsError(f"profile {new_name!r} already exists")
+    # Update the name inside the JSON, then move the file.
+    profile = _load_path(src)
+    profile.name = new_name
+    tmp = dst.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(asdict(profile), indent=2, sort_keys=True))
+    tmp.replace(dst)
+    src.unlink()
+
+
 def _load_path(path: Path) -> Profile:
     data = json.loads(path.read_text())
     # Older profiles used `last_params`; accept either key.

@@ -40,6 +40,9 @@
                 hx-swap="innerHTML">
             <h4>Connection</h4>
             <div class="grid">
+              <label>Name <input name="new_name" required value="{{ p.name }}"
+                                  pattern="[A-Za-z0-9._-]{1,64}"
+                                  title="letters, digits, dot, underscore, hyphen; max 64 chars"></label>
               <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
               <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
               <label>Loader

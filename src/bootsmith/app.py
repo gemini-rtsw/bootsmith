@@ -113,7 +113,20 @@ def create_app() -> Flask:
         has_param_fields = any(k.startswith("param_") for k in request.form.keys())
         if has_param_fields or loader_changed:
             existing.boot_params = new_params
-        profiles_mod.save_profile(existing)
+
+        # Handle rename if a new_name was submitted and it differs.
+        new_name = (request.form.get("new_name") or "").strip()
+        if new_name and new_name != name:
+            try:
+                profiles_mod.save_profile(existing)  # save current state first
+                profiles_mod.rename_profile(name, new_name)
+                existing.name = new_name
+            except FileExistsError:
+                return _error(f"profile {new_name!r} already exists"), 409
+            except Exception as e:
+                return _error(f"rename failed: {e}"), 400
+        else:
+            profiles_mod.save_profile(existing)
         # If the edit was triggered from inside an active session, return
         # the params panel so we don't blow away the session view.
         if request.headers.get("X-Return") == "params":
