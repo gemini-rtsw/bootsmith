@@ -143,16 +143,27 @@
         pre.scrollTop = pre.scrollHeight;
       }
 
+      // Bind terminal keydown ONCE at the document level via event
+      // delegation. The handler checks the event target and only acts
+      // when the source is #terminal-input. This survives any DOM
+      // churn — the input element can be detached/reattached and the
+      // listener still works because it lives on document, not on the
+      // input itself.
+      let __terminalDelegateBound = false;
+
       function bindTerminal() {
         const input = document.getElementById("terminal-input");
         if (!input) return;
-        // Always rebind: remove any previous handler first to avoid
-        // stacking duplicate listeners after many swaps.
-        if (input.__bootsmithKeydown) {
-          input.removeEventListener("keydown", input.__bootsmithKeydown);
+        if (__terminalDelegateBound) {
+          // Already bound at document level; just refocus.
+          input.focus();
+          return;
         }
+        __terminalDelegateBound = true;
 
         const handler = (e) => {
+          if (e.target.id !== "terminal-input") return;
+          const input = e.target;
           if (e.key === "Enter") {
             e.preventDefault();
             sendBytes("\r");
@@ -190,15 +201,16 @@
             return;
           }
         };
-        input.addEventListener("keydown", handler);
-        input.__bootsmithKeydown = handler;
+        document.addEventListener("keydown", handler);
 
         // Click anywhere in the serial pane to refocus the input.
-        const pre = document.getElementById("serial");
-        if (pre && !pre.__bootsmithFocusBound) {
-          pre.addEventListener("click", () => input.focus());
-          pre.__bootsmithFocusBound = true;
-        }
+        // Delegated at document level too, for the same reason.
+        document.addEventListener("click", (e) => {
+          if (e.target && e.target.id === "serial") {
+            const inp = document.getElementById("terminal-input");
+            if (inp) inp.focus();
+          }
+        });
         input.focus();
       }
 
