@@ -240,6 +240,7 @@ def write_params(
                 continue
 
             raw_value = values.get(key, "")
+            _log(f"iter {iters}: matched {label!r} (key={key}) -> sending {raw_value!r}")
             if raw_value == "":
                 transport.write(b"\r")
             elif raw_value == ".":
