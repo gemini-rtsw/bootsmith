@@ -7,8 +7,25 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-_PROFILE_DIR = Path(os.path.expanduser("~/.bootsmith/profiles"))
+# Default profile location. Overridden by --profiles-dir or BOOTSMITH_PROFILES_DIR.
+_DEFAULT_PROFILE_DIR = Path(os.path.expanduser("~/.bootsmith/profiles"))
+_PROFILE_DIR: Path = Path(
+    os.environ.get("BOOTSMITH_PROFILES_DIR", str(_DEFAULT_PROFILE_DIR))
+).expanduser()
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def set_profile_dir(path: Path | str) -> None:
+    """Override the directory profiles are read from / written to.
+
+    Called from the CLI entry point if --profiles-dir is given.
+    """
+    global _PROFILE_DIR
+    _PROFILE_DIR = Path(path).expanduser()
+
+
+def profile_dir() -> Path:
+    return _PROFILE_DIR
 
 
 @dataclass
@@ -35,6 +52,10 @@ def _profile_path(name: str) -> Path:
     if not _NAME_RE.match(name):
         raise ValueError(f"invalid profile name: {name!r}")
     return _PROFILE_DIR / f"{name}.json"
+
+
+def _dir() -> Path:
+    return _PROFILE_DIR
 
 
 def ensure_dir() -> None:
