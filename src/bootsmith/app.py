@@ -5,10 +5,22 @@ from dataclasses import asdict
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
+from . import ppcbug as ppcbug_mod
 from . import profiles as profiles_mod
 from . import schemas as schemas_mod
 from . import vxworks as vxworks_mod
 from .session import SessionManager
+
+
+def _driver_for(loader: str):
+    """Return the (write_params, read_params) module-level functions for a
+    loader, or None if we don't have a driver yet for it.
+    """
+    if loader == "vxworks":
+        return vxworks_mod
+    if loader == "ppcbug":
+        return ppcbug_mod
+    return None
 
 
 VALID_LOADERS = set(schemas_mod.LOADER_LABELS.keys())
@@ -209,10 +221,11 @@ def create_app() -> Flask:
         sess = sessions.current()
         if sess is None:
             return _error("no session open"), 404
+        fields = schemas_mod.fields_for(sess.profile.loader_hint)
         return render_template(
             "_params_push.html",
             profile=sess.profile,
-            fields=vxworks_mod.FIELDS_WITH_UNIT,
+            fields=fields,
         )
 
     @app.post("/params/push")
@@ -225,19 +238,29 @@ def create_app() -> Flask:
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
             return _error(f"not at a loader prompt (state={ws.state})"), 409
-        if ws.loader != "vxworks":
-            return _error(f"loader {ws.loader!r} not supported yet"), 400
+        driver = _driver_for(ws.loader or "")
+        if driver is None:
+            return _error(f"no driver for loader {ws.loader!r}"), 400
         values = dict(sess.profile.boot_params)
         try:
-            vxworks_mod.write_params(sess.transport, values)
-            verify = vxworks_mod.read_params(sess.transport)
+            driver.write_params(sess.transport, values)
+            verify = driver.read_params(sess.transport)
         except ConnectionError as e:
             return _error(f"WTI session is dead during push: {e}. Reconnect and retry."), 502
+        fields = schemas_mod.fields_for(ws.loader)
         diff = []
-        for _label, key in vxworks_mod.FIELDS_WITH_UNIT:
+        for _label, key in fields:
             want = values.get(key, "")
             got = verify.params.get(key, "")
-            if want and want != got:
+            if not want:
+                continue
+            if want == ".":
+                # We asked the board to clear this field. Success means the
+                # field is absent from readback (or empty).
+                if got:
+                    diff.append({"key": key, "want": "(cleared)", "got": got})
+                continue
+            if want != got:
                 diff.append({"key": key, "want": want, "got": got})
         return render_template(
             "_params_verify.html",
@@ -252,8 +275,10 @@ def create_app() -> Flask:
         sess = sessions.current()
         if sess is None:
             return _error("no session open"), 404
-        vxworks_mod.boot(sess.transport)
-        # Close the session — the board is leaving the loader.
+        loader = sess.watcher.status().loader or sess.profile.loader_hint
+        driver = _driver_for(loader)
+        if driver is not None:
+            driver.boot(sess.transport)
         sessions.close()
         return _render_profile_list()
 

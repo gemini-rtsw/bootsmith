@@ -117,9 +117,14 @@ def read_params(transport: WTITransport, timeout: float = 6.0) -> ReadResult:
         transport.write(b"\r")
     except Exception:
         pass
-    _t.sleep(0.2)
+    _t.sleep(0.3)
     raw = _command(transport, b"p\r", timeout=timeout)
-    return ReadResult(params=_parse_print(raw), raw=raw)
+    parsed = _parse_print(raw)
+    _log(
+        f"read_params: {len(raw)}B captured, parsed {len(parsed)} fields. "
+        f"raw[-300:]={raw[-300:]!r}"
+    )
+    return ReadResult(params=parsed, raw=raw)
 
 
 def write_params(
