@@ -11,6 +11,7 @@
   <header>
     <h1>Bootsmith</h1>
     <p class="tagline">VME boot-parameter editor over WTI serial</p>
+    <div id="diag" style="font-family: monospace; font-size: 11px; color: #888; padding: 2px 8px;">diag: -</div>
   </header>
 
   <main id="main">
@@ -313,11 +314,29 @@
         if (e.detail && e.detail.target && window.htmx) {
           try { window.htmx.process(e.detail.target); } catch (_) {}
         }
-        // Re-bind the terminal handler after every swap. The input
-        // element survives (#params swaps don't touch it) but its
-        // event listener can get knocked out under load. bindTerminal
-        // removes the old listener and re-attaches.
         bindTerminal();
+      });
+
+      // Diagnostic strip in the header — updates on every htmx event so
+      // you can see at a glance what the client thinks is happening.
+      const diag = document.getElementById("diag");
+      function setDiag(msg) {
+        if (diag) diag.textContent = "diag: " + new Date().toLocaleTimeString() + " " + msg;
+      }
+      const HTMX_EVENTS = [
+        "htmx:beforeRequest", "htmx:beforeSend",
+        "htmx:xhr:loadstart", "htmx:xhr:loadend",
+        "htmx:afterRequest", "htmx:beforeSwap", "htmx:afterSwap",
+        "htmx:responseError", "htmx:sendError", "htmx:timeout",
+        "htmx:targetError", "htmx:swapError",
+      ];
+      HTMX_EVENTS.forEach((ev) => {
+        document.body.addEventListener(ev, (e) => {
+          const path = e.detail && e.detail.pathInfo
+            ? e.detail.pathInfo.requestPath
+            : (e.detail && e.detail.requestConfig ? e.detail.requestConfig.path : "?");
+          setDiag(ev.replace("htmx:", "") + " " + (path || ""));
+        });
       });
     })();
   </script>
