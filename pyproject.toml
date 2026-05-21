@@ -9,6 +9,7 @@ description = "GUI for editing VME boot parameters (PPCBug / Tornado VxWorks) ov
 requires-python = ">=3.10"
 dependencies = [
     "flask>=3.0",
+    "flask-sock>=0.7",
 ]
 
 [project.scripts]

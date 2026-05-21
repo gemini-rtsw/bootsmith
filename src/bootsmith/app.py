@@ -4,6 +4,7 @@ import time
 from dataclasses import asdict
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask_sock import Sock
 
 from . import ppcbug as ppcbug_mod
 from . import profiles as profiles_mod
@@ -38,6 +39,7 @@ def _render_profile_list():
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["sessions"] = SessionManager()
+    sock = Sock(app)
 
     @app.get("/")
     def index():
@@ -226,6 +228,92 @@ def create_app() -> Flask:
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @sock.route("/ws/terminal")
+    def ws_terminal(ws):
+        """WebSocket: bidirectional terminal pipe.
+
+        Bytes from the board come down as binary messages.
+        Bytes typed by the user go up as binary messages and are written
+        to the transport. Keepalive text messages ('ping') are tolerated
+        but ignored. Closing the WS does NOT close the Bootsmith session.
+        """
+        import sys as _sys
+        import threading as _th
+        import time as _t
+
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            try:
+                ws.send("ERR no session open")
+            except Exception:
+                pass
+            return
+
+        transport = sess.transport
+        q = transport.subscribe(seed_history=True)
+
+        # Snapshot first so reload starts with recent history.
+        try:
+            snap = transport.snapshot()
+            if snap:
+                ws.send(snap)
+        except Exception:
+            transport.unsubscribe(q)
+            return
+
+        stop = _th.Event()
+
+        def pump_in():
+            """Forward bytes received from the board to the browser."""
+            while not stop.is_set():
+                if q:
+                    chunk = q.popleft()
+                    try:
+                        ws.send(chunk)
+                    except Exception:
+                        stop.set()
+                        return
+                else:
+                    _t.sleep(0.02)
+                    if not transport.status().connected:
+                        # Tell the client; let it decide whether to reconnect.
+                        try:
+                            ws.send("EVT disconnected")
+                        except Exception:
+                            pass
+                        return
+
+        t = _th.Thread(target=pump_in, name="ws-pump-in", daemon=True)
+        t.start()
+
+        try:
+            while not stop.is_set():
+                msg = ws.receive(timeout=None)
+                if msg is None:
+                    break
+                if isinstance(msg, str):
+                    if msg == "ping":
+                        continue
+                    # Treat any other text as raw chars (rare path).
+                    data = msg.encode("utf-8", errors="replace")
+                else:
+                    data = msg
+                if not data:
+                    continue
+                try:
+                    transport.write(data)
+                except Exception as e:
+                    print(f"[ws] write failed: {e}", file=_sys.stderr, flush=True)
+                    try:
+                        ws.send(f"ERR write failed: {e}")
+                    except Exception:
+                        pass
+                    break
+        finally:
+            stop.set()
+            transport.unsubscribe(q)
 
     @app.get("/params")
     def params_panel():

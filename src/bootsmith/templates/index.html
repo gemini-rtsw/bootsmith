@@ -33,28 +33,8 @@
         missed: "no prompt detected",
       };
 
-      let es = null;
       let pollTimer = null;
       let lastProfile = null;
-
-      function bytesAppend(pre, b64) {
-        const bin = atob(b64);
-        let s = "";
-        for (let i = 0; i < bin.length; i++) {
-          const c = bin.charCodeAt(i);
-          if (c === 13) continue;
-          if (c === 9 || c === 10 || (c >= 32 && c < 127)) {
-            s += String.fromCharCode(c);
-          } else {
-            s += "\\x" + c.toString(16).padStart(2, "0");
-          }
-        }
-        pre.appendChild(document.createTextNode(s));
-        if (pre.textContent.length > 200000) {
-          pre.textContent = pre.textContent.slice(-150000);
-        }
-        pre.scrollTop = pre.scrollHeight;
-      }
 
       let paramsLoadedForLoader = null;
 
@@ -129,19 +109,37 @@
         } catch (_) {}
       }
 
+      let ws = null;
+
       function sendBytes(bytes) {
-        // bytes can be a string (Latin-1) or Uint8Array.
-        let bin;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        let buf;
         if (typeof bytes === "string") {
-          bin = bytes;
+          buf = new Uint8Array(bytes.length);
+          for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i) & 0xff;
         } else {
-          bin = "";
-          for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+          buf = bytes;
         }
-        const b64 = btoa(bin);
-        const form = new FormData();
-        form.append("b", b64);
-        fetch("/session/key", { method: "POST", body: form });
+        ws.send(buf);
+      }
+
+      function bytesAppendRaw(pre, data) {
+        // data is a Uint8Array of raw bytes.
+        let s = "";
+        for (let i = 0; i < data.length; i++) {
+          const c = data[i];
+          if (c === 13) continue;
+          if (c === 9 || c === 10 || (c >= 32 && c < 127)) {
+            s += String.fromCharCode(c);
+          } else {
+            s += "\\x" + c.toString(16).padStart(2, "0");
+          }
+        }
+        pre.appendChild(document.createTextNode(s));
+        if (pre.textContent.length > 200000) {
+          pre.textContent = pre.textContent.slice(-150000);
+        }
+        pre.scrollTop = pre.scrollHeight;
       }
 
       function bindTerminal() {
@@ -203,31 +201,32 @@
         stop();
         lastProfile = profile;
         const pre = document.getElementById("serial");
-        console.log("[bootsmith] starting EventSource for", profile);
-        es = new EventSource("/session/stream");
-        es.addEventListener("snapshot", (e) => pre && bytesAppend(pre, e.data));
-        es.addEventListener("chunk", (e) => pre && bytesAppend(pre, e.data));
-        es.addEventListener("closed", () => {
-          console.log("[bootsmith] stream closed event");
-          stop();
-        });
-        es.onerror = (e) => {
-          console.warn("[bootsmith] EventSource error", e);
-          const state = document.getElementById("status-state");
-          if (state) state.textContent = "stream error";
+        console.log("[bootsmith] opening WebSocket for", profile);
+
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(proto + "//" + location.host + "/ws/terminal");
+        ws.binaryType = "arraybuffer";
+        ws.onopen = () => console.log("[bootsmith] ws open");
+        ws.onmessage = (ev) => {
+          if (typeof ev.data === "string") {
+            // Control messages: "EVT disconnected", "ERR ..."
+            console.log("[bootsmith] ws msg:", ev.data);
+            return;
+          }
+          if (pre) bytesAppendRaw(pre, new Uint8Array(ev.data));
         };
+        ws.onclose = () => console.log("[bootsmith] ws closed");
+        ws.onerror = (e) => console.warn("[bootsmith] ws error", e);
+
         poll();
         pollTimer = setInterval(poll, 500);
         bindTerminal();
       }
 
       function stop() {
-        if (es) { try { es.close(); } catch (_) {} es = null; }
+        if (ws) { try { ws.close(); } catch (_) {} ws = null; }
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         lastProfile = null;
-        // Reset session-scoped state so the NEXT connect re-loads params
-        // fresh. Previously this stuck and made the second connect look
-        // like nothing was happening.
         paramsLoadedForLoader = null;
       }
 
