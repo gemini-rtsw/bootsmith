@@ -186,33 +186,37 @@ def write_params(
 
     q = transport.subscribe(seed_history=False)
     last_label: Optional[bytes] = None
+    last_responded_at_len = 0
     iters = 0
     _log(f"write_params: sending c\\r (values keys: {list(values.keys())})")
     try:
         transport.write(b"c\r")
         for _ in range(64):
             iters += 1
-            # Wait for the next prompt. To avoid mis-targeting (responding
-            # to the same prompt twice, or matching an echo of our reply),
-            # require that the tail of the buffer ends with a label:...
-            # AND the label is DIFFERENT from the one we just responded to,
-            # OR [VxWorks Boot]: indicating dialogue closed.
+            # Wait for the next prompt. To avoid mis-targeting we require
+            # BOTH (a) the tail ends with label:... AND (b) the buffer has
+            # grown past where we last responded (so we're not matching an
+            # echo of our own reply or the prior iteration's prompt).
+            # The "label differs from last" gate is dropped: the firmware
+            # legitimately re-prompts the same label after 'invalid number.'
+            # and we MUST respond to it the second time too.
             deadline = time.time() + timeout_per_field
             label_match: Optional[bytes] = None
             dialogue_closed = False
             while time.time() < deadline:
                 while q:
                     raw_buf.extend(q.popleft())
+                if len(raw_buf) <= last_responded_at_len:
+                    time.sleep(0.02)
+                    continue
                 tail = bytes(raw_buf[-512:])
                 if end_prompt_re.search(tail):
                     dialogue_closed = True
                     break
                 m = pending_prompt_re.search(tail)
                 if m is not None:
-                    candidate = m.group(1)
-                    if candidate != last_label:
-                        label_match = candidate
-                        break
+                    label_match = m.group(1)
+                    break
                 time.sleep(0.02)
 
             if dialogue_closed:
@@ -246,8 +250,12 @@ def write_params(
                 # cleanly. Backspaces do not work in this loader.
                 transport.write(raw_value.encode() + b"\r")
                 fields_written.append(key)
-            # Remember which label we just answered so the next iteration
-            # waits for a DIFFERENT prompt before responding again.
+            # Remember where the buffer was after our response. Next iteration
+            # only matches a prompt if the buffer has grown PAST this point —
+            # i.e. the board has emitted new bytes (the echo of our reply
+            # plus the next prompt). Without this gate the same prompt tail
+            # would match again and we'd respond twice.
+            last_responded_at_len = len(raw_buf)
             last_label = label_match
         else:
             _log("dialogue exceeded 64 iterations; bailing with ^D")
