@@ -212,10 +212,12 @@ def write_params(
                 if end_prompt_re.search(tail):
                     dialogue_closed = True
                     break
-                # Find the start of the last line in the buffer.
+                # Find the start of the last line in the buffer. The boot
+                # ROM separates lines with bare \r (no \n) between dialogue
+                # prompts, so consider either \r or \n a line break.
                 buf_bytes = bytes(raw_buf)
-                last_nl = buf_bytes.rfind(b"\n")
-                line_start = last_nl + 1 if last_nl >= 0 else 0
+                last_break = max(buf_bytes.rfind(b"\n"), buf_bytes.rfind(b"\r"))
+                line_start = last_break + 1 if last_break >= 0 else 0
                 # Only consider this a new prompt if the line begins
                 # after where we last responded.
                 if line_start >= last_responded_at_len and any_prompt_re.search(tail):
