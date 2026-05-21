@@ -127,23 +127,26 @@ def read_params(transport: WTITransport, timeout: float = 6.0) -> ReadResult:
     return ReadResult(params=parsed, raw=raw)
 
 
-def _discover_field_order(transport: WTITransport, timeout: float = 4.0) -> list[tuple[str, str]]:
-    """Run `p` and return the (label, key) tuples in the order this firmware
-    prints them. Some firmware skips fields (e.g. unit_number on dc devices).
-    Returning the actual visible order lets write_params walk the dialogue
-    in lock-step without having to identify each prompt by label.
-    """
-    raw = _command(transport, b"p\r", timeout=timeout)
-    label_set = {label: key for label, key in FIELDS_WITH_UNIT}
-    out: list[tuple[str, str]] = []
-    for line in re.split(rb"[\r\n]+", raw):
-        m = re.match(rb"^[ \t]*([A-Za-z][^:\r\n]*?)\s*:[ \t]*(.*?)[ \t\r]*$", line)
-        if m is None:
-            continue
-        label = m.group(1).decode(errors="replace").strip()
-        if label in label_set:
-            out.append((label, label_set[label]))
-    return out
+# Observed `c` dialogue order on real MVME2700 / VxWorks 5.4 firmware.
+# Different from `p` output: `c` skips `unit_number` for dc/geisc devices
+# (the device implies the unit). If you hit a board that prompts for unit
+# number in c, the warning in write_params will log a mismatch.
+C_DIALOGUE_ORDER: tuple[tuple[str, str], ...] = (
+    ("boot device",                         "boot_device"),
+    ("processor number",                    "processor_number"),
+    ("host name",                           "host_name"),
+    ("file name",                           "file_name"),
+    ("inet on ethernet (e)",                "inet_on_ethernet"),
+    ("inet on backplane (b)",               "inet_on_backplane"),
+    ("host inet (h)",                       "host_inet"),
+    ("gateway inet (g)",                    "gateway_inet"),
+    ("user (u)",                            "user"),
+    ("ftp password (pw) (blank = use rsh)", "ftp_password"),
+    ("flags (f)",                           "flags"),
+    ("target name (tn)",                    "target_name"),
+    ("startup script (s)",                  "startup_script"),
+    ("other (o)",                           "other"),
+)
 
 
 def write_params(
@@ -174,18 +177,11 @@ def write_params(
     raw_buf = bytearray()
     fields_written: list[str] = []
 
-    # Discover the field order this firmware actually shows by running `p`
-    # first. The schema FIELDS_WITH_UNIT is the union of fields across
-    # firmware variants; any specific firmware may show only a subset.
-    # Walking the dialogue in the discovered order means we don't have to
-    # identify each prompt by label — we KNOW what field is being prompted
-    # because we counted them.
-    try:
-        order = _discover_field_order(transport, timeout=timeout_per_field)
-    except Exception as e:
-        _log(f"discover_field_order failed: {e}; falling back to full schema")
-        order = list(FIELDS_WITH_UNIT)
-    _log(f"write_params: discovered field order ({len(order)}): {[k for _, k in order]}")
+    # Use the observed c-dialogue order. Don't discover from `p` because
+    # `p` and `c` show different field sets (p shows unit_number, c skips
+    # it on dc-style boot devices).
+    order = list(C_DIALOGUE_ORDER)
+    _log(f"write_params: dialogue order ({len(order)}): {[k for _, k in order]}")
 
     end_prompt_re = re.compile(rb"\[VxWorks Boot\]:\s*\Z")
     # A prompt is "label : ..." at end of buffer. We only use it as a
@@ -233,6 +229,21 @@ def write_params(
                 except Exception:
                     pass
                 break
+
+            # Sanity-check: extract the actual label the board printed at
+            # this prompt and warn if it disagrees with what we expect.
+            # Don't trust the extracted label for routing — we use the
+            # order list — but log so we can spot firmware differences.
+            tail = bytes(raw_buf[-200:])
+            m_actual = re.search(rb"([A-Za-z][^:\r\n]*)\s*:\s*[^\r\n]*\Z", tail)
+            actual_label = (
+                m_actual.group(1).decode(errors="replace").strip() if m_actual else "?"
+            )
+            if actual_label != label:
+                _log(
+                    f"WARNING iter {iters}: expected prompt {label!r} but "
+                    f"board printed {actual_label!r}. Field order may be wrong."
+                )
 
             raw_value = values.get(key, "")
             _log(f"iter {iters}: prompt for {label!r} (key={key}) -> sending {raw_value!r}")
