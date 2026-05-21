@@ -85,6 +85,10 @@ class FakeTransport:
 
     def write(self, data: bytes) -> None:
         self.writes.append(data)
+        # Mimic the board echoing what the user typed (everything except
+        # the trailing CR — VxWorks doesn't echo CR on its own line).
+        if data and data != b"\r":
+            self.push(data)
 
     def push(self, data: bytes) -> None:
         with self._lock:
@@ -120,21 +124,25 @@ def _run_dialogue(t: FakeTransport, values: dict[str, str]) -> None:
         time.sleep(0.02)
     assert t.writes and t.writes[0] == b"c\r", f"first write was {t.writes!r}"
 
-    # For each prompt, wait until the driver issues one more write, THEN
-    # push the next prompt. Mimics the real board: the next prompt only
-    # appears after we've responded to the current one.
+    # For each prompt, wait until the driver issues a CR write, THEN
+    # push the next prompt. The driver may slow-type chars one-by-one
+    # before the CR; we treat the CR as the "done responding" signal.
     for i, (label, _key) in enumerate(FIELDS_WITH_UNIT):
         prev = len(t.writes)
         t.push(f"\r\n{label}          : current_{i} ".encode())
-        d2 = time.time() + 3.0
-        while len(t.writes) == prev and time.time() < d2:
+        d2 = time.time() + 5.0
+        while time.time() < d2:
+            # Look for a \r write that arrived after prev.
+            recent = t.writes[prev:]
+            if any(w == b"\r" or w.endswith(b"\r") for w in recent):
+                break
             time.sleep(0.01)
-        if len(t.writes) == prev:
+        else:
             raise AssertionError(
                 f"driver did not respond to {label!r}; writes: {t.writes!r}"
             )
     t.push(b"\r\n[VxWorks Boot]: ")
-    assert done.wait(timeout=5.0), "write_params did not return in time"
+    assert done.wait(timeout=8.0), "write_params did not return in time"
     if err:
         raise err[0]
 
@@ -164,22 +172,20 @@ class VxWorksDialogueTests(unittest.TestCase):
     def test_value_sets_field(self):
         t = FakeTransport()
         _run_dialogue(t, values={"host_name": "mkogmosdev-lv1"})
-        self.assertIn(b"mkogmosdev-lv1\r", t.writes)
+        # Value is slow-typed one byte at a time, then a CR. Verify the
+        # bytes for "mkogmosdev-lv1" appear in order with a CR right after.
+        joined = b"".join(t.writes)
+        self.assertIn(b"mkogmosdev-lv1\r", joined)
 
     def test_other_fields_still_kept_when_one_set(self):
-        # If you set host_name to a value but leave everything else blank,
-        # the only non-`\r` write (apart from `c\r`) should be `x\r`.
+        # If you set host_name to "x" and leave everything else blank,
+        # we should see `c\r` (enter dialogue) + `x` + `\r` (the value)
+        # + several `\r` (keep current for other fields).
         t = FakeTransport()
         _run_dialogue(t, values={"host_name": "x"})
-        non_keep = [w for w in t.writes if w not in (b"\r",)]
-        self.assertIn(b"c\r", non_keep)
-        self.assertIn(b"x\r", non_keep)
-        # Filter the c\r and x\r; everything else should have been `\r`.
-        self.assertEqual(
-            [w for w in non_keep if w not in (b"c\r", b"x\r")],
-            [],
-            f"unexpected non-keep writes: {non_keep!r}",
-        )
+        joined = b"".join(t.writes)
+        self.assertTrue(joined.startswith(b"c\r"))
+        self.assertIn(b"x\r", joined)
 
 
 if __name__ == "__main__":

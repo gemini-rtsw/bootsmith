@@ -246,15 +246,33 @@ def write_params(
                 transport.write(b".\r")
                 fields_written.append(key)
             else:
-                # Just send the value + CR. VxWorks `c` replaces the field
-                # cleanly. Backspaces do not work in this loader.
-                transport.write(raw_value.encode() + b"\r")
+                # Type the value one character at a time with a small delay
+                # between each. The VxWorks dialogue has a tiny input buffer
+                # and bursting a long value (e.g. 50-char path) causes
+                # characters to be dropped or interleaved with prompt echo,
+                # which corrupts BOTH this field and the next.
+                # Backspaces don't work in this loader, so once corrupted
+                # the value is stuck until another c-run.
+                for ch in raw_value.encode():
+                    transport.write(bytes([ch]))
+                    time.sleep(0.015)  # ~67 chars/sec, slow enough for the ROM
+                transport.write(b"\r")
+                # Wait until our typed value has been echoed back into the
+                # buffer. The board echoes each char before it processes the
+                # CR. If we move on before that, the next prompt's bytes get
+                # interleaved with the tail of our echo.
+                want_echo = raw_value.encode()
+                deadline = time.time() + 4.0
+                while time.time() < deadline:
+                    while q:
+                        raw_buf.extend(q.popleft())
+                    # Look for the echoed value in the recent buffer tail.
+                    if want_echo in bytes(raw_buf[-(len(want_echo) + 100):]):
+                        break
+                    time.sleep(0.02)
                 fields_written.append(key)
             # Remember where the buffer was after our response. Next iteration
-            # only matches a prompt if the buffer has grown PAST this point —
-            # i.e. the board has emitted new bytes (the echo of our reply
-            # plus the next prompt). Without this gate the same prompt tail
-            # would match again and we'd respond twice.
+            # only matches a prompt if the buffer has grown PAST this point.
             last_responded_at_len = len(raw_buf)
             last_label = label_match
         else:
