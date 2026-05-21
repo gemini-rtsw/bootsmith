@@ -196,12 +196,14 @@ def write_params(
         transport.write(b"c\r")
         for label, key in order:
             iters += 1
-            # Wait for the next prompt to arrive. The board emits the
-            # next prompt on its OWN line (preceded by \r\n) after we
-            # respond. So a valid "next prompt" is a label:tail where
-            # the line-start (i.e. the byte after the most recent \r\n)
-            # is past last_responded_at_len. Without that anchor we'd
-            # falsely match our own response's echo at the tail.
+            # Wait for the next prompt to arrive. Criterion: the buffer
+            # has grown since we finished writing iter N-1's response,
+            # AND the tail ends in a "label : value" prompt. After we
+            # write a response the board echoes it (drained by the
+            # echo-wait below before we set last_responded_at_len), so
+            # at that mark the tail does NOT end in a prompt. Any later
+            # tail-prompt-match therefore came from new output, which
+            # is the next field's prompt.
             deadline = time.time() + timeout_per_field
             arrived = False
             dialogue_closed = False
@@ -212,15 +214,7 @@ def write_params(
                 if end_prompt_re.search(tail):
                     dialogue_closed = True
                     break
-                # Find the start of the last line in the buffer. The boot
-                # ROM separates lines with bare \r (no \n) between dialogue
-                # prompts, so consider either \r or \n a line break.
-                buf_bytes = bytes(raw_buf)
-                last_break = max(buf_bytes.rfind(b"\n"), buf_bytes.rfind(b"\r"))
-                line_start = last_break + 1 if last_break >= 0 else 0
-                # Only consider this a new prompt if the line begins
-                # after where we last responded.
-                if line_start >= last_responded_at_len and any_prompt_re.search(tail):
+                if len(raw_buf) > last_responded_at_len and any_prompt_re.search(tail):
                     arrived = True
                     break
                 time.sleep(0.02)
