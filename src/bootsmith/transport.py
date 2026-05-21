@@ -346,3 +346,191 @@ class WTITransport:
                     self._ring_len -= len(old)
                 for q in self._subscribers:
                     q.append(chunk)
+
+
+# Default transport used by the rest of the app. Aliased so existing
+# `WTITransport` type hints keep working — both classes have the same
+# public interface (open/close/write/subscribe/unsubscribe/snapshot/status).
+# To switch back to the raw-socket transport, alias Transport = WTITransport.
+class TelnetTransport:
+    """Transport that wraps Python's stdlib telnetlib.
+
+    Same public interface as WTITransport (open / close / write /
+    subscribe / unsubscribe / snapshot / status / reopen), but uses
+    telnetlib for the actual connection. telnetlib handles all IAC
+    negotiation properly and is the same code path real telnet clients
+    use, so we avoid the silent-socket / negotiation-stall problems we
+    hit with raw sockets.
+
+    telnetlib was removed in Python 3.13. The test box runs 3.10 so this
+    is fine for now.
+    """
+
+    def __init__(self, host: str, port: int, ring_bytes: int = 64 * 1024):
+        self.host = host
+        self.port = port
+        self._tn = None  # telnetlib.Telnet
+        self._reader: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._ring: deque[bytes] = deque()
+        self._ring_max = ring_bytes
+        self._ring_len = 0
+        self._subscribers: list[deque[bytes]] = []
+        self._status = TransportStatus(connected=False, host=host, port=port)
+
+    def open(self, timeout: float = 5.0) -> None:
+        if self._tn is not None:
+            return
+        import telnetlib
+
+        tn = telnetlib.Telnet(self.host, self.port, timeout=timeout)
+        # telnetlib's underlying socket: enable TCP keepalive so a silent
+        # WTI session timeout gets detected by the kernel.
+        try:
+            sock = tn.get_socket()
+            if sock is not None:
+                _enable_keepalive(sock)
+        except Exception:
+            pass
+        self._tn = tn
+        self._stop.clear()
+        self._status = TransportStatus(
+            connected=True, host=self.host, port=self.port, opened_at=time.time()
+        )
+        self._reader = threading.Thread(
+            target=self._read_loop,
+            name=f"telnet-reader-{self.host}:{self.port}",
+            daemon=True,
+        )
+        self._reader.start()
+
+    def close(self) -> None:
+        self._stop.set()
+        with self._lock:
+            tn = self._tn
+            self._tn = None
+        if tn is not None:
+            try:
+                tn.close()
+            except Exception:
+                pass
+        self._status.connected = False
+
+    def reopen(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        with self._lock:
+            tn = self._tn
+            self._tn = None
+        if tn is not None:
+            try:
+                tn.close()
+            except Exception:
+                pass
+        import telnetlib
+
+        new = telnetlib.Telnet(self.host, self.port, timeout=timeout)
+        try:
+            sock = new.get_socket()
+            if sock is not None:
+                _enable_keepalive(sock)
+        except Exception:
+            pass
+        with self._lock:
+            self._tn = new
+        self._stop.clear()
+        self._status = TransportStatus(
+            connected=True, host=self.host, port=self.port, opened_at=time.time()
+        )
+        self._reader = threading.Thread(
+            target=self._read_loop,
+            name=f"telnet-reader-{self.host}:{self.port}",
+            daemon=True,
+        )
+        self._reader.start()
+
+    def write(self, data: bytes) -> None:
+        with self._lock:
+            tn = self._tn
+        if tn is None:
+            raise ConnectionError("transport not open")
+        try:
+            tn.write(data)
+            self._status.last_send_at = time.time()
+        except (BrokenPipeError, ConnectionResetError, OSError, EOFError) as e:
+            self._status.error = f"write failed: {e}"
+            self._status.connected = False
+            with self._lock:
+                self._tn = None
+            try:
+                tn.close()
+            except Exception:
+                pass
+            raise ConnectionError(str(e)) from e
+        self._status.bytes_out += len(data)
+
+    def status(self) -> TransportStatus:
+        return self._status
+
+    def subscribe(self, seed_history: bool = True) -> deque[bytes]:
+        q: deque[bytes] = deque()
+        with self._lock:
+            self._subscribers.append(q)
+            if seed_history:
+                for chunk in self._ring:
+                    q.append(chunk)
+        return q
+
+    def unsubscribe(self, q: deque[bytes]) -> None:
+        with self._lock:
+            try:
+                self._subscribers.remove(q)
+            except ValueError:
+                pass
+
+    def snapshot(self) -> bytes:
+        with self._lock:
+            return b"".join(self._ring)
+
+    def _read_loop(self) -> None:
+        import sys as _sys
+
+        while not self._stop.is_set():
+            with self._lock:
+                tn = self._tn
+            if tn is None:
+                return
+            try:
+                # read_very_eager: non-blocking, handles IAC internally,
+                # returns bytes already cleaned of telnet negotiation.
+                chunk = tn.read_very_eager()
+            except EOFError:
+                self._status.connected = False
+                self._status.error = "peer closed connection"
+                print(
+                    f"[telnet {self.host}:{self.port}] peer closed",
+                    file=_sys.stderr, flush=True,
+                )
+                return
+            except OSError as e:
+                self._status.error = str(e)
+                self._status.connected = False
+                print(
+                    f"[telnet {self.host}:{self.port}] read error: {e}",
+                    file=_sys.stderr, flush=True,
+                )
+                return
+            if not chunk:
+                # No data right now; sleep a tick before checking again.
+                time.sleep(0.02)
+                continue
+            self._status.bytes_in += len(chunk)
+            self._status.last_recv_at = time.time()
+            with self._lock:
+                self._ring.append(chunk)
+                self._ring_len += len(chunk)
+                while self._ring_len > self._ring_max and self._ring:
+                    old = self._ring.popleft()
+                    self._ring_len -= len(old)
+                for q in self._subscribers:
+                    q.append(chunk)

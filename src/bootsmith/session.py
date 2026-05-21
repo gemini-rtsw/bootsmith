@@ -5,14 +5,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .profiles import Profile
-from .transport import WTITransport
+from .transport import TelnetTransport
 from .watcher import BannerWatcher
 
 
 @dataclass
 class Session:
     profile: Profile
-    transport: WTITransport
+    transport: TelnetTransport
     watcher: BannerWatcher
     last_error: Optional[str] = None
     log: list[str] = field(default_factory=list)
@@ -45,12 +45,12 @@ class SessionManager:
         import time as _t
 
         last_err: Optional[Exception] = None
-        transport: Optional[WTITransport] = None
+        transport: Optional[TelnetTransport] = None
         for delay in (0.0, 1.0, 2.0, 3.0, 5.0):
             if delay:
                 _t.sleep(delay)
             try:
-                transport = WTITransport(profile.wti_host, profile.wti_port)
+                transport = TelnetTransport(profile.wti_host, profile.wti_port)
                 transport.open(timeout=4.0)
                 # Probe: a CR should provoke either a prompt echo OR the
                 # WTI dropping us within ~1s if it doesn't actually want us.
