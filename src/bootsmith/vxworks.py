@@ -158,49 +158,52 @@ def write_params(
     # sitting at.
     next_prompt_re = re.compile(rb"(" + labels_alt + rb")\s*:")
 
+    # Regex that anchors to the END of buffer: "<label> : <something>" with
+    # no trailing newline. That's what the dialogue looks like when it's
+    # waiting for input — the colon, optional current value, no CR/LF yet.
+    pending_prompt_re = re.compile(
+        rb"(" + labels_alt + rb")\s*:[^\r\n]*\Z"
+    )
+    end_prompt_re = re.compile(rb"\[VxWorks Boot\]:\s*\Z")
+
     q = transport.subscribe(seed_history=False)
+    last_responded_at_len = 0
     try:
         transport.write(b"c\r")
-        last_buf_len = len(raw_buf)
-        # Loop forever; we exit when we see [VxWorks Boot]: which means
-        # the dialogue closed.
-        for _ in range(64):  # hard cap so a misbehaving board can't loop us
-            # Wait until buf GROWS — i.e. new bytes arrive — before deciding
-            # we've seen a new prompt. Without this, the same prompt match
-            # fires repeatedly and we spam responses.
+        for _ in range(64):
+            # Wait for a NEW prompt to arrive. "New" means: buffer has grown
+            # since our last response AND tail ends with a label:... prompt
+            # (or [VxWorks Boot]: indicating dialogue closed). Without the
+            # "buffer grew" requirement, the same already-matched prompt
+            # fires repeatedly because we respond and the tail doesn't
+            # change immediately on the board side.
             deadline = time.time() + timeout_per_field
-            grew = False
+            label_match: Optional[bytes] = None
+            dialogue_closed = False
             while time.time() < deadline:
                 while q:
                     raw_buf.extend(q.popleft())
-                if len(raw_buf) > last_buf_len:
-                    grew = True
-                    break
+                if len(raw_buf) > last_responded_at_len:
+                    tail = bytes(raw_buf[-512:])
+                    if end_prompt_re.search(tail):
+                        dialogue_closed = True
+                        break
+                    m = pending_prompt_re.search(tail)
+                    if m is not None:
+                        label_match = m.group(1)
+                        break
                 time.sleep(0.02)
-            if not grew:
+
+            if dialogue_closed:
+                break
+            if label_match is None:
                 _log("timed out waiting for next prompt; sending ^D to bail")
                 try:
                     transport.write(b"\x04")
                 except Exception:
                     pass
                 break
-            last_buf_len = len(raw_buf)
 
-            tail = bytes(raw_buf[-512:])
-            if PROMPT_RE.search(tail):
-                # Dialogue closed cleanly.
-                break
-
-            # Identify the prompt the dialogue is currently sitting at by
-            # finding the LAST occurrence of a known label followed by ":".
-            matches = next_prompt_re.findall(tail)
-            label_match: Optional[bytes] = None
-            if matches:
-                last = matches[-1]
-                label_match = last[0] if isinstance(last, tuple) else last
-            if label_match is None:
-                transport.write(b"\r")
-                continue
             label = label_match.decode()
             key = label_to_key.get(label)
             if key is None:
@@ -218,6 +221,10 @@ def write_params(
                 # cleanly. Backspaces do not work in this loader.
                 transport.write(raw_value.encode() + b"\r")
                 fields_written.append(key)
+            # Mark "we responded at this buf position" — next iteration must
+            # see the buffer grow past this point before matching another
+            # prompt. Prevents responding to the same prompt twice.
+            last_responded_at_len = len(raw_buf)
         else:
             _log("dialogue exceeded 64 iterations; bailing with ^D")
             try:
