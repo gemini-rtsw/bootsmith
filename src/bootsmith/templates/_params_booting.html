@@ -1,0 +1,16 @@
+<section class="params" id="params">
+  <h3>Booting {{ profile.name }}…</h3>
+  <p class="hint">
+    <code>@</code> sent. Watch the live serial pane above for boot output.
+    The session stays open so you can intervene (Ctrl-C, send a CR, etc.) via
+    the terminal input if something goes wrong.
+  </p>
+  <div class="controls">
+    <form hx-get="/params" hx-target="#params" hx-swap="outerHTML" class="inline">
+      <button type="submit">Back to params</button>
+    </form>
+    <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
+      <button type="submit" class="danger">Disconnect</button>
+    </form>
+  </div>
+</section>

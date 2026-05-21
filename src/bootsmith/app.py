@@ -310,9 +310,14 @@ def create_app() -> Flask:
         loader = sess.watcher.status().loader or sess.profile.loader_hint
         driver = _driver_for(loader)
         if driver is not None:
-            driver.boot(sess.transport)
-        sessions.close()
-        return _render_profile_list()
+            try:
+                driver.boot(sess.transport)
+            except ConnectionError as e:
+                return _error(f"WTI session is dead during boot: {e}."), 502
+        # Stay connected so the user can watch the boot scroll past in the
+        # live serial pane. Render a small status panel that replaces the
+        # params section but keeps the session open.
+        return render_template("_params_booting.html", profile=sess.profile)
 
     @app.post("/session/send")
     def session_send():

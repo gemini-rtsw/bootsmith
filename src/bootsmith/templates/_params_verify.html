@@ -23,8 +23,8 @@
   </table>
 
   <div class="controls">
-    <form hx-post="/params/boot" hx-target="#main" hx-swap="innerHTML"
-          hx-confirm="Boot the board with these params? The WTI session will close."
+    <form hx-post="/params/boot" hx-target="#params" hx-swap="outerHTML"
+          hx-confirm="Boot the board with these params? Session stays open so you can watch."
           class="inline">
       <button type="submit" class="primary">Boot (@)</button>
     </form>
