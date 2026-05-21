@@ -168,6 +168,10 @@ class WTITransport:
             raise ConnectionError("transport not open")
         try:
             sock.sendall(data)
+            print(
+                f"[transport {self.host}:{self.port}] sent {len(data)}B: {data[:60]!r}",
+                file=sys.stderr, flush=True,
+            )
         except (BrokenPipeError, ConnectionResetError, OSError) as e:
             # Peer closed the socket. Mark the transport dead so the UI sees
             # it on the next status poll. Don't let the exception bubble up
@@ -294,13 +298,9 @@ class WTITransport:
                 subs_count = len(self._subscribers)
                 for q in self._subscribers:
                     q.append(chunk)
-            # Only log every Nth chunk to avoid spam; useful to see if
-            # the subscriber count drops mid-stream.
-            self._status.error  # noqa: keep
-            if self._status.bytes_in % 4096 < len(chunk):
-                print(
-                    f"[transport {self.host}:{self.port}] chunk fanout: "
-                    f"{len(chunk)}B -> {subs_count} subscribers "
-                    f"(total in={self._status.bytes_in}B)",
-                    file=sys.stderr, flush=True,
-                )
+            # Log every chunk for now (we're debugging a missing-bytes issue).
+            print(
+                f"[transport {self.host}:{self.port}] recv {len(chunk)}B "
+                f"-> {subs_count} subs (total in={self._status.bytes_in}B)",
+                file=sys.stderr, flush=True,
+            )
