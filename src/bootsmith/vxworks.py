@@ -191,6 +191,7 @@ def write_params(
     q = transport.subscribe(seed_history=False)
     last_responded_at_len = 0
     iters = 0
+    _log("write_params: BUILD=e18eb09+sentinel (growth-only gate)")
     _log(f"write_params: sending c\\r (values keys: {list(values.keys())})")
     try:
         transport.write(b"c\r")
@@ -223,9 +224,15 @@ def write_params(
                 _log(f"write_params: dialogue closed early after {iters} of {len(order)}")
                 break
             if not arrived:
+                _tail = bytes(raw_buf[-200:])
+                _prompt_m = any_prompt_re.search(_tail)
                 _log(
                     f"write_params: timed out (iter {iters}/{len(order)}) "
-                    f"waiting for prompt for {label!r}; tail={bytes(raw_buf[-200:])!r}"
+                    f"waiting for prompt for {label!r}; "
+                    f"len(raw_buf)={len(raw_buf)} last_responded_at_len={last_responded_at_len} "
+                    f"growth={len(raw_buf) - last_responded_at_len} "
+                    f"prompt_match={_prompt_m!r} "
+                    f"tail={_tail!r}"
                 )
                 try:
                     transport.write(b"\x04")
