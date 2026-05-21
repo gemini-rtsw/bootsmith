@@ -1,17 +1,19 @@
 {# Always-visible action bar. Same buttons no matter which view of the
-   params section is currently rendered. #}
+   params section is currently rendered. All swaps target the stable
+   #params wrapper with innerHTML so htmx never has to replace the
+   element that owns the click listeners with one of identical id. #}
 <div class="controls">
-  <form hx-post="/params/push" hx-target="#params" hx-swap="outerHTML"
+  <form hx-post="/params/push" hx-target="#params" hx-swap="innerHTML"
         hx-confirm="Push saved params to {{ profile.name }}?"
         class="inline">
     <button type="submit" class="primary">Push to board</button>
   </form>
-  <form hx-post="/params/boot" hx-target="#params" hx-swap="outerHTML"
+  <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML"
         hx-confirm="Boot the board with current params? Session stays open."
         class="inline">
     <button type="submit" class="primary">Boot (@)</button>
   </form>
-  <form hx-get="/params/edit" hx-target="#params" hx-swap="outerHTML" class="inline">
+  <form hx-get="/params/edit" hx-target="#params" hx-swap="innerHTML" class="inline">
     <button type="submit">Edit</button>
   </form>
   <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">

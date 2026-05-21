@@ -1,25 +1,23 @@
-<section class="params" id="params">
-  <h3>Current values on {{ profile.name }}</h3>
-  {% if diff %}
-    <div class="error">
-      <strong>Some fields did not read back as expected:</strong>
-      <ul>
-        {% for d in diff %}
-          <li><code>{{ d.key }}</code>: wrote <code>{{ d.want }}</code>, read back <code>{{ d.got }}</code></li>
-        {% endfor %}
-      </ul>
-    </div>
-  {% else %}
-    <p class="ok">All written fields read back identically.</p>
-  {% endif %}
-
-  <table class="params-table">
-    <tbody>
-      {% for key, value in current.items() %}
-        <tr><th>{{ key }}</th><td><code>{{ value }}</code></td></tr>
+<h3>Current values on {{ profile.name }}</h3>
+{% if diff %}
+  <div class="error">
+    <strong>Some fields did not read back as expected:</strong>
+    <ul>
+      {% for d in diff %}
+        <li><code>{{ d.key }}</code>: wrote <code>{{ d.want }}</code>, read back <code>{{ d.got }}</code></li>
       {% endfor %}
-    </tbody>
-  </table>
+    </ul>
+  </div>
+{% else %}
+  <p class="ok">All written fields read back identically.</p>
+{% endif %}
 
-  {% include "_params_actions.html" %}
-</section>
+<table class="params-table">
+  <tbody>
+    {% for key, value in current.items() %}
+      <tr><th>{{ key }}</th><td><code>{{ value }}</code></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% include "_params_actions.html" %}

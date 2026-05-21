@@ -1,9 +1,7 @@
-<section class="params" id="params">
-  <h3>Boot params for {{ profile.name }}</h3>
-  {% include "_params_table.html" %}
-  <p class="hint">
-    Blank in profile = keep current value on board.
-    <code>.</code> in a field = clear that field on board.
-  </p>
-  {% include "_params_actions.html" %}
-</section>
+<h3>Boot params for {{ profile.name }}</h3>
+{% include "_params_table.html" %}
+<p class="hint">
+  Blank in profile = keep current value on board.
+  <code>.</code> in a field = clear that field on board.
+</p>
+{% include "_params_actions.html" %}

@@ -85,15 +85,16 @@
           }
         }
 
-        // Auto-load the params form when we hit AT_PROMPT on a supported loader.
-        if (paramsContainer && j.state === "at_prompt" && j.loader === "vxworks") {
+        // Auto-load the params panel when we hit AT_PROMPT on a supported loader.
+        if (paramsContainer && j.state === "at_prompt"
+            && (j.loader === "vxworks" || j.loader === "ppcbug")) {
           if (paramsLoadedForLoader !== j.loader) {
             paramsLoadedForLoader = j.loader;
-            console.log("[bootsmith] loading params form");
-            paramsContainer.innerHTML = '<p class="hint">Reading boot params...</p>';
+            console.log("[bootsmith] loading params panel");
+            paramsContainer.innerHTML = '<p class="hint">Loading saved params...</p>';
             fetch("/params").then(r => r.text()).then(html => {
-              paramsContainer.outerHTML = html;
-              if (window.htmx) window.htmx.process(document.getElementById("params"));
+              paramsContainer.innerHTML = html;
+              if (window.htmx) window.htmx.process(paramsContainer);
             });
           }
         } else if (j.state !== "at_prompt") {
