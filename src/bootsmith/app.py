@@ -385,6 +385,7 @@ def create_app() -> Flask:
         return render_template(
             "_params_verify.html",
             profile=sess.profile,
+            fields=fields,
             current=verify.params,
             wrote=values,
             diff=diff,
@@ -406,7 +407,11 @@ def create_app() -> Flask:
         # Stay connected so the user can watch the boot scroll past in the
         # live serial pane. Render a small status panel that replaces the
         # params section but keeps the session open.
-        return render_template("_params_booting.html", profile=sess.profile)
+        return render_template(
+            "_params_booting.html",
+            profile=sess.profile,
+            fields=schemas_mod.fields_for(sess.profile.loader_hint),
+        )
 
     @app.post("/session/send")
     def session_send():

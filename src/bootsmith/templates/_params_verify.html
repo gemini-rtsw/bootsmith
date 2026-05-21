@@ -1,6 +1,7 @@
-{# Renders after a Push. Needs `profile` in addition to current/diff so
-   the always-visible action bar at the bottom can include the profile name. #}
 <section class="params" id="params">
+  <h3>Saved boot params for {{ profile.name }}</h3>
+  {% include "_params_table.html" %}
+
   <h3>Verification</h3>
   {% if diff %}
     <div class="error">

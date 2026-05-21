@@ -1,0 +1,16 @@
+{# Saved-params display. Shows whatever is currently saved in the
+   profile.boot_params dict, formatted as a table. Used by all
+   params views except the edit form. #}
+{% if profile.boot_params %}
+  <table class="params-table">
+    <tbody>
+      {% for label, key in fields %}
+        {% if profile.boot_params.get(key) %}
+          <tr><th>{{ label }}</th><td><code>{{ profile.boot_params[key] }}</code></td></tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="hint">No boot params saved yet. Click Edit to fill them in.</p>
+{% endif %}
