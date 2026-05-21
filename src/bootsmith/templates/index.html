@@ -156,8 +156,11 @@
         const input = document.getElementById("terminal-input");
         if (!input) return;
         if (__terminalDelegateBound) {
-          // Already bound at document level; just refocus.
-          input.focus();
+          // Already bound at document level; do nothing further. We
+          // deliberately do NOT auto-refocus the terminal input here,
+          // because that would steal focus from whatever the user was
+          // typing into (e.g. a profile-edit field) every time an htmx
+          // swap fires. Stray keystrokes would then end up at the WTI.
           return;
         }
         __terminalDelegateBound = true;
@@ -212,6 +215,8 @@
             if (inp) inp.focus();
           }
         });
+        // Initial focus only — subsequent re-binds (after htmx swaps)
+        // skip the focus call (see early return above).
         input.focus();
       }
 
