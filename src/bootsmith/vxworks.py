@@ -254,18 +254,25 @@ def write_params(
                 fields_written.append(key)
             else:
                 # Slow-type to avoid input-buffer overrun on this firmware.
+                # Remember buffer length BEFORE we start typing — the echo
+                # check below only counts bytes that arrived AFTER this
+                # point, so we don't match a stale instance of the value
+                # from earlier in the dialogue (the firmware echoes the
+                # value next to the prompt too, so the same string can
+                # appear multiple times).
+                pre_write_len = len(raw_buf)
                 for ch in raw_value.encode():
                     transport.write(bytes([ch]))
                     time.sleep(0.015)
                 transport.write(b"\r")
-                # Wait for the echo of our typed value before considering
-                # this field done, so we don't blur into the next prompt.
                 want_echo = raw_value.encode()
                 edl = time.time() + 4.0
                 while time.time() < edl:
                     while q:
                         raw_buf.extend(q.popleft())
-                    if want_echo in bytes(raw_buf[-(len(want_echo) + 100):]):
+                    # Only search bytes that arrived after we started typing.
+                    new_bytes = bytes(raw_buf[pre_write_len:])
+                    if want_echo in new_bytes:
                         break
                     time.sleep(0.02)
                 fields_written.append(key)
