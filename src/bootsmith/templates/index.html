@@ -145,13 +145,14 @@
 
       function bindTerminal() {
         const input = document.getElementById("terminal-input");
-        if (!input || input.__bootsmithBound) return;
-        input.__bootsmithBound = true;
+        if (!input) return;
+        // Always rebind: remove any previous handler first to avoid
+        // stacking duplicate listeners after many swaps.
+        if (input.__bootsmithKeydown) {
+          input.removeEventListener("keydown", input.__bootsmithKeydown);
+        }
 
-        // Always behaves like a real terminal: every keystroke is sent
-        // immediately. Enter sends CR. Backspace sends DEL. Esc/Tab/
-        // Ctrl-<letter> all pass through.
-        input.addEventListener("keydown", (e) => {
+        const handler = (e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             sendBytes("\r");
@@ -188,12 +189,15 @@
             input.value += e.key;
             return;
           }
-        });
+        };
+        input.addEventListener("keydown", handler);
+        input.__bootsmithKeydown = handler;
 
         // Click anywhere in the serial pane to refocus the input.
         const pre = document.getElementById("serial");
-        if (pre) {
+        if (pre && !pre.__bootsmithFocusBound) {
           pre.addEventListener("click", () => input.focus());
+          pre.__bootsmithFocusBound = true;
         }
         input.focus();
       }
@@ -294,13 +298,14 @@
       document.addEventListener("DOMContentLoaded", reconcile);
       document.body.addEventListener("htmx:afterSwap", (e) => {
         reconcile();
-        // Belt-and-suspenders: explicitly re-process the swapped element
-        // so any hx-* attributes in the new content get bound. htmx
-        // usually does this automatically, but it's been observed to
-        // miss after several consecutive swaps of the same target.
         if (e.detail && e.detail.target && window.htmx) {
           try { window.htmx.process(e.detail.target); } catch (_) {}
         }
+        // Re-bind the terminal handler after every swap. The input
+        // element survives (#params swaps don't touch it) but its
+        // event listener can get knocked out under load. bindTerminal
+        // removes the old listener and re-attaches.
+        bindTerminal();
       });
     })();
   </script>
