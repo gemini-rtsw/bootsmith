@@ -277,24 +277,33 @@ def create_app() -> Flask:
 
         try:
             while True:
+                # If the underlying socket is closed, bail. simple_websocket
+                # exposes `connected`; if it goes False we must exit so the
+                # subscriber gets cleaned up and the client's reconnect can
+                # land on a fresh handler.
+                if not getattr(ws, "connected", True):
+                    print("[ws] connection no longer reports connected; exiting", file=_sys.stderr, flush=True)
+                    return
+
                 # Drain any board-to-browser bytes first.
-                sent_any = False
                 while q:
                     chunk = q.popleft()
                     try:
                         ws.send(chunk)
-                        sent_any = True
                     except Exception as e:
                         print(f"[ws] send failed: {e}", file=_sys.stderr, flush=True)
                         return
 
                 # Non-blocking receive for browser-to-board.
                 try:
-                    msg = ws.receive(timeout=0.02)
+                    msg = ws.receive(timeout=0.05)
                 except Exception as e:
                     print(f"[ws] receive failed: {e}", file=_sys.stderr, flush=True)
                     return
                 if msg is None:
+                    # Could be timeout (still connected) or close.
+                    if not getattr(ws, "connected", True):
+                        return
                     if not transport.status().connected:
                         try:
                             ws.send("EVT disconnected")

@@ -238,12 +238,13 @@
           console.log("[bootsmith] ws closed");
           if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
           ws = null;
-          // If the WS closed very quickly after opening, the server is
-          // probably rejecting us (no session yet). Back off so we don't
-          // hammer it.
+          // Back off ONLY when the server closed us before sending
+          // anything useful (no session). Otherwise reconnect fast.
           const lived = Date.now() - wsLastOpenAt;
-          if (lived < 500) {
-            wsBackoff = Math.min(wsBackoff * 2, 10000);
+          if (lived < 200) {
+            wsBackoff = Math.min(wsBackoff * 2, 5000);
+          } else {
+            wsBackoff = 500;
           }
           if (wsShouldStayOpen) scheduleWSReconnect();
         };
