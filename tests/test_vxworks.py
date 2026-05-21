@@ -70,7 +70,7 @@ class FakeTransport:
         self._subs: list[deque[bytes]] = []
         self.writes: list[bytes] = []
 
-    def subscribe(self) -> deque[bytes]:
+    def subscribe(self, seed_history: bool = True) -> deque[bytes]:
         q: deque[bytes] = deque()
         with self._lock:
             self._subs.append(q)

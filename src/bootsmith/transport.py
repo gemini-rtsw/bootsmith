@@ -187,13 +187,23 @@ class WTITransport:
     def status(self) -> TransportStatus:
         return self._status
 
-    def subscribe(self) -> deque[bytes]:
+    def subscribe(self, seed_history: bool = True) -> deque[bytes]:
+        """Subscribe to incoming chunks.
+
+        seed_history=True: queue starts with the recent ring-buffer history,
+        useful for the live SSE view so the browser sees what came before
+        it connected.
+        seed_history=False: queue starts empty. Use this for command/response
+        flows (like the VxWorks dialogue) where you only want the bytes that
+        arrive AFTER you sent your command; otherwise prior prompts in the
+        history match your wait pattern and short-circuit the read.
+        """
         q: deque[bytes] = deque()
         with self._lock:
             self._subscribers.append(q)
-            # Seed with current ring contents so a new subscriber sees recent history.
-            for chunk in self._ring:
-                q.append(chunk)
+            if seed_history:
+                for chunk in self._ring:
+                    q.append(chunk)
         return q
 
     def unsubscribe(self, q: deque[bytes]) -> None:

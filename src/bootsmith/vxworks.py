@@ -158,7 +158,7 @@ def write_params(
     # sitting at.
     next_prompt_re = re.compile(rb"(" + labels_alt + rb")\s*:")
 
-    q = transport.subscribe()
+    q = transport.subscribe(seed_history=False)
     try:
         transport.write(b"c\r")
         last_buf_len = len(raw_buf)
@@ -244,7 +244,7 @@ def _command(transport: WTITransport, cmd: bytes, timeout: float) -> bytes:
 
     Returns the raw bytes received (including command echo).
     """
-    q = transport.subscribe()
+    q = transport.subscribe(seed_history=False)
     buf = bytearray()
     try:
         transport.write(cmd)
