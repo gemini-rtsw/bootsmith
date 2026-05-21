@@ -75,6 +75,8 @@ class TransportStatus:
     bytes_in: int = 0
     bytes_out: int = 0
     opened_at: float | None = None
+    last_send_at: float | None = None
+    last_recv_at: float | None = None
 
 
 class WTITransport:
@@ -162,16 +164,35 @@ class WTITransport:
         self._reader.start()
 
     def write(self, data: bytes) -> None:
+        # Self-healing: if we've sent bytes but haven't seen any reply in
+        # >8s, the TCP socket is probably silently half-dead (WTI dropped
+        # us but the kernel hasn't noticed). Force a reopen before this
+        # write so the user doesn't have to disconnect and reconnect.
+        now = time.time()
+        if (
+            self._status.bytes_out > 0
+            and self._status.last_send_at is not None
+            and self._status.last_recv_at is not None
+            and self._status.last_send_at > self._status.last_recv_at
+            and now - self._status.last_send_at > 8.0
+        ):
+            print(
+                f"[transport {self.host}:{self.port}] silent socket detected "
+                f"(no recv for {now - self._status.last_recv_at:.1f}s); reopening",
+                file=sys.stderr, flush=True,
+            )
+            try:
+                self.reopen()
+            except Exception as e:
+                raise ConnectionError(f"reopen failed: {e}") from e
+
         with self._lock:
             sock = self._sock
         if sock is None:
             raise ConnectionError("transport not open")
         try:
             sock.sendall(data)
-            print(
-                f"[transport {self.host}:{self.port}] sent {len(data)}B: {data[:60]!r}",
-                file=sys.stderr, flush=True,
-            )
+            self._status.last_send_at = time.time()
         except (BrokenPipeError, ConnectionResetError, OSError) as e:
             # Peer closed the socket. Mark the transport dead so the UI sees
             # it on the next status poll. Don't let the exception bubble up
@@ -289,18 +310,12 @@ class WTITransport:
             if not chunk:
                 continue
             self._status.bytes_in += len(chunk)
+            self._status.last_recv_at = time.time()
             with self._lock:
                 self._ring.append(chunk)
                 self._ring_len += len(chunk)
                 while self._ring_len > self._ring_max and self._ring:
                     old = self._ring.popleft()
                     self._ring_len -= len(old)
-                subs_count = len(self._subscribers)
                 for q in self._subscribers:
                     q.append(chunk)
-            # Log every chunk for now (we're debugging a missing-bytes issue).
-            print(
-                f"[transport {self.host}:{self.port}] recv {len(chunk)}B "
-                f"-> {subs_count} subs (total in={self._status.bytes_in}B)",
-                file=sys.stderr, flush=True,
-            )
