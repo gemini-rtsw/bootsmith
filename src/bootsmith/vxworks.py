@@ -103,8 +103,21 @@ class WriteResult:
     fields_written: list[str]
 
 
-def read_params(transport: WTITransport, timeout: float = 4.0) -> ReadResult:
-    """Send `p` and parse the response."""
+def read_params(transport: WTITransport, timeout: float = 6.0) -> ReadResult:
+    """Send `p` and parse the response.
+
+    Sends an extra CR first to make sure we're at a fresh prompt before
+    issuing `p`. Without this, if the prior command left echoed bytes in
+    the pipeline, `_command`'s prompt-match can short-circuit and miss
+    the actual `p` output.
+    """
+    import time as _t
+
+    try:
+        transport.write(b"\r")
+    except Exception:
+        pass
+    _t.sleep(0.2)
     raw = _command(transport, b"p\r", timeout=timeout)
     return ReadResult(params=_parse_print(raw), raw=raw)
 
@@ -167,30 +180,30 @@ def write_params(
     end_prompt_re = re.compile(rb"\[VxWorks Boot\]:\s*\Z")
 
     q = transport.subscribe(seed_history=False)
-    last_responded_at_len = 0
+    last_label: Optional[bytes] = None
     try:
         transport.write(b"c\r")
         for _ in range(64):
-            # Wait for a NEW prompt to arrive. "New" means: buffer has grown
-            # since our last response AND tail ends with a label:... prompt
-            # (or [VxWorks Boot]: indicating dialogue closed). Without the
-            # "buffer grew" requirement, the same already-matched prompt
-            # fires repeatedly because we respond and the tail doesn't
-            # change immediately on the board side.
+            # Wait for the next prompt. To avoid mis-targeting (responding
+            # to the same prompt twice, or matching an echo of our reply),
+            # require that the tail of the buffer ends with a label:...
+            # AND the label is DIFFERENT from the one we just responded to,
+            # OR [VxWorks Boot]: indicating dialogue closed.
             deadline = time.time() + timeout_per_field
             label_match: Optional[bytes] = None
             dialogue_closed = False
             while time.time() < deadline:
                 while q:
                     raw_buf.extend(q.popleft())
-                if len(raw_buf) > last_responded_at_len:
-                    tail = bytes(raw_buf[-512:])
-                    if end_prompt_re.search(tail):
-                        dialogue_closed = True
-                        break
-                    m = pending_prompt_re.search(tail)
-                    if m is not None:
-                        label_match = m.group(1)
+                tail = bytes(raw_buf[-512:])
+                if end_prompt_re.search(tail):
+                    dialogue_closed = True
+                    break
+                m = pending_prompt_re.search(tail)
+                if m is not None:
+                    candidate = m.group(1)
+                    if candidate != last_label:
+                        label_match = candidate
                         break
                 time.sleep(0.02)
 
@@ -221,10 +234,9 @@ def write_params(
                 # cleanly. Backspaces do not work in this loader.
                 transport.write(raw_value.encode() + b"\r")
                 fields_written.append(key)
-            # Mark "we responded at this buf position" — next iteration must
-            # see the buffer grow past this point before matching another
-            # prompt. Prevents responding to the same prompt twice.
-            last_responded_at_len = len(raw_buf)
+            # Remember which label we just answered so the next iteration
+            # waits for a DIFFERENT prompt before responding again.
+            last_label = label_match
         else:
             _log("dialogue exceeded 64 iterations; bailing with ^D")
             try:
