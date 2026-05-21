@@ -20,6 +20,31 @@ SB = 0xFA
 SE = 0xF0
 
 
+def _enable_keepalive(s: socket.socket) -> None:
+    """Turn on TCP keepalive so a silent peer (e.g. WTI session timeout)
+    causes the kernel to detect the dead connection within ~60s rather
+    than leaving us with a zombie socket that accepts writes and never
+    delivers reads.
+    """
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    # Tune the keepalive timing if the platform supports it. On Linux:
+    #   TCP_KEEPIDLE  = seconds of idle before first probe (default ~7200)
+    #   TCP_KEEPINTVL = seconds between probes
+    #   TCP_KEEPCNT   = number of failed probes before dropping
+    # We want ~60s detection: 30s idle, 10s interval, 3 probes.
+    for opt_name, val in (
+        ("TCP_KEEPIDLE", 30),
+        ("TCP_KEEPINTVL", 10),
+        ("TCP_KEEPCNT", 3),
+    ):
+        opt = getattr(socket, opt_name, None)
+        if opt is not None:
+            try:
+                s.setsockopt(socket.IPPROTO_TCP, opt, val)
+            except OSError:
+                pass
+
+
 def _consume_iac(buf: bytes) -> tuple[bytes, bytes]:
     """Pull IAC sequences out of `buf`.
 
@@ -103,6 +128,7 @@ class WTITransport:
         if self._sock is not None:
             return
         s = socket.create_connection((self.host, self.port), timeout=timeout)
+        _enable_keepalive(s)
         s.settimeout(0.5)
         self._sock = s
         self._stop.clear()
@@ -146,6 +172,7 @@ class WTITransport:
                 pass
         # Re-open.
         s = socket.create_connection((self.host, self.port), timeout=timeout)
+        _enable_keepalive(s)
         s.settimeout(0.5)
         with self._lock:
             self._sock = s
