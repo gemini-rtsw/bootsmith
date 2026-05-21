@@ -196,22 +196,29 @@ def write_params(
         transport.write(b"c\r")
         for label, key in order:
             iters += 1
-            # Wait for the next prompt to arrive: tail ends with ":..."
-            # and buffer has grown past last response.
+            # Wait for the next prompt to arrive. The board emits the
+            # next prompt on its OWN line (preceded by \r\n) after we
+            # respond. So a valid "next prompt" is a label:tail where
+            # the line-start (i.e. the byte after the most recent \r\n)
+            # is past last_responded_at_len. Without that anchor we'd
+            # falsely match our own response's echo at the tail.
             deadline = time.time() + timeout_per_field
             arrived = False
             dialogue_closed = False
             while time.time() < deadline:
                 while q:
                     raw_buf.extend(q.popleft())
-                if len(raw_buf) <= last_responded_at_len:
-                    time.sleep(0.02)
-                    continue
                 tail = bytes(raw_buf[-512:])
                 if end_prompt_re.search(tail):
                     dialogue_closed = True
                     break
-                if any_prompt_re.search(tail):
+                # Find the start of the last line in the buffer.
+                buf_bytes = bytes(raw_buf)
+                last_nl = buf_bytes.rfind(b"\n")
+                line_start = last_nl + 1 if last_nl >= 0 else 0
+                # Only consider this a new prompt if the line begins
+                # after where we last responded.
+                if line_start >= last_responded_at_len and any_prompt_re.search(tail):
                     arrived = True
                     break
                 time.sleep(0.02)
