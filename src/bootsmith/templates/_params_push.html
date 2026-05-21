@@ -1,11 +1,7 @@
+{% set saved_count = profile.boot_params|length %}
 <section class="params" id="params">
-  <h3>Saved boot params for {{ profile.name }}</h3>
+  <h3>Boot params for {{ profile.name }}</h3>
   {% if profile.boot_params %}
-    <p class="hint">
-      These values will be written to the board. Edit the profile to change them.
-      Reminder: a saved value of <code>.</code> (single dot) clears the field on the board;
-      fields not listed below are blank in the profile and will keep their current board value.
-    </p>
     <table class="params-table">
       <tbody>
         {% for label, key in fields %}
@@ -15,31 +11,12 @@
         {% endfor %}
       </tbody>
     </table>
-    <div class="controls">
-      <form hx-post="/params/push" hx-target="#params" hx-swap="outerHTML"
-            hx-confirm="Push these {{ profile.boot_params|length }} param(s) to {{ profile.name }}?"
-            class="inline">
-        <button type="submit" class="primary">Push to board</button>
-      </form>
-      <form hx-get="/params/edit" hx-target="#params" hx-swap="outerHTML" class="inline">
-        <button type="submit">Edit</button>
-      </form>
-      <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
-        <button type="submit" class="danger">Disconnect</button>
-      </form>
-    </div>
   {% else %}
-    <div class="error">
-      <strong>This profile has no boot params saved.</strong>
-      Click Edit below to fill them in.
-    </div>
-    <div class="controls">
-      <form hx-get="/params/edit" hx-target="#params" hx-swap="outerHTML" class="inline">
-        <button type="submit" class="primary">Edit</button>
-      </form>
-      <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
-        <button type="submit" class="danger">Disconnect</button>
-      </form>
-    </div>
+    <p class="hint">No boot params saved yet. Click Edit to fill them in.</p>
   {% endif %}
+  <p class="hint">
+    Blank in profile = keep current value on board.
+    <code>.</code> in a field = clear that field on board.
+  </p>
+  {% include "_params_actions.html" %}
 </section>

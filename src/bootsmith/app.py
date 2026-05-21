@@ -296,6 +296,7 @@ def create_app() -> Flask:
                 diff.append({"key": key, "want": want, "got": got})
         return render_template(
             "_params_verify.html",
+            profile=sess.profile,
             current=verify.params,
             wrote=values,
             diff=diff,

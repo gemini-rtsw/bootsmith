@@ -1,3 +1,5 @@
+{# Renders after a Push. Needs `profile` in addition to current/diff so
+   the always-visible action bar at the bottom can include the profile name. #}
 <section class="params" id="params">
   <h3>Verification</h3>
   {% if diff %}
@@ -22,17 +24,5 @@
     </tbody>
   </table>
 
-  <div class="controls">
-    <form hx-post="/params/boot" hx-target="#params" hx-swap="outerHTML"
-          hx-confirm="Boot the board with these params? Session stays open so you can watch."
-          class="inline">
-      <button type="submit" class="primary">Boot (@)</button>
-    </form>
-    <form hx-get="/params/edit" hx-target="#params" hx-swap="outerHTML" class="inline">
-      <button type="submit">Edit</button>
-    </form>
-    <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
-      <button type="submit" class="danger">Disconnect (leave at prompt)</button>
-    </form>
-  </div>
+  {% include "_params_actions.html" %}
 </section>

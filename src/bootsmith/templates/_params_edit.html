@@ -8,7 +8,7 @@
     {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
     <div class="controls">
       <button type="submit" class="primary">Save</button>
-      <button type="button" hx-get="/params" hx-target="#params" hx-swap="outerHTML">Cancel</button>
     </div>
   </form>
+  {% include "_params_actions.html" %}
 </section>
