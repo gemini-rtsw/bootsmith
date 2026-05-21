@@ -27,10 +27,10 @@
     (function () {
       const STATE_LABEL = {
         idle: "idle",
-        waiting: "waiting for reboot",
-        aborting: "ABORTING — spamming key",
+        waiting: "waiting for prompt",
+        aborting: "...",
         at_prompt: "AT PROMPT",
-        missed: "MISSED abort window",
+        missed: "no prompt detected",
       };
 
       let es = null;
@@ -64,7 +64,6 @@
         const aborts = document.getElementById("status-aborts");
         const bytes = document.getElementById("status-bytes");
         const banner = document.getElementById("status-banner");
-        const rearm = document.getElementById("rearm-form");
         const reconnectForm = document.getElementById("reconnect-form");
         const paramsContainer = document.getElementById("params");
         if (!state) return; // session section not in DOM
@@ -97,7 +96,6 @@
         if (bytes && j.transport) {
           bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
         }
-        if (rearm) rearm.style.display = (j.state === "missed") ? "" : "none";
         if (banner) {
           if (j.notes && j.notes.length) {
             banner.textContent = j.notes[j.notes.length - 1];

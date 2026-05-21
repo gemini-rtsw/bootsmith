@@ -31,17 +31,10 @@
   </div>
 
   <div class="controls">
-    <form hx-post="/session/rearm" hx-swap="none" class="inline" id="rearm-form" style="display:none">
-      <button type="submit" class="primary" title="Reset watcher to waiting state so you can reboot again">Re-arm</button>
-    </form>
     <form hx-post="/session/reconnect" hx-swap="none" class="inline" id="reconnect-form" style="display:none">
       <button type="submit" class="primary" title="The WTI dropped our socket. Reopen it.">Reconnect</button>
     </form>
   </div>
-
-  <p class="hint">
-    Reboot the board now. Bootsmith will watch for a boot banner and spam the abort key.
-  </p>
 
   <div id="params"></div>
 </section>
