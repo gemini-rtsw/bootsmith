@@ -82,7 +82,7 @@ FIELDS_WITH_UNIT: tuple[tuple[str, str], ...] = (
 PROMPT_RE = re.compile(rb"\[VxWorks Boot\]:\s*$")
 # Print-output line: "label : value". Label may contain parens, the value
 # extends to end of line. We're permissive about leading whitespace.
-PRINT_LINE_RE = re.compile(rb"^\s*([A-Za-z][^:]*?)\s*:\s*(.*?)\s*$", re.MULTILINE)
+PRINT_LINE_RE = re.compile(rb"^[ \t]*([A-Za-z][^:\r\n]*?)\s*:[ \t]*([^\r\n]*?)[ \t\r]*$", re.MULTILINE)
 
 
 def _log(msg: str) -> None:
@@ -322,12 +322,20 @@ def _parse_print(raw: bytes) -> dict[str, str]:
 
     The boot ROM prints lines like `boot device          : geisc`. We map each
     known label to its schema key. Unknown lines are ignored.
+
+    We split on EITHER \\r or \\n (not just \\n) because the board's command
+    echo (e.g. 'p\\r') can land on the same chunk as the first data line,
+    producing 'p\\rboot device : geisc' with no \\n between them. Splitting
+    on both characters separately gives us a clean line per item.
     """
     label_to_key = {label.lower(): key for label, key in FIELDS_WITH_UNIT}
     out: dict[str, str] = {}
-    for match in PRINT_LINE_RE.finditer(raw):
-        label = match.group(1).decode(errors="replace").strip().lower()
-        value = match.group(2).decode(errors="replace").strip()
+    for line in re.split(rb"[\r\n]+", raw):
+        m = re.match(rb"^[ \t]*([A-Za-z][^:\r\n]*?)\s*:[ \t]*(.*?)[ \t]*$", line)
+        if m is None:
+            continue
+        label = m.group(1).decode(errors="replace").strip().lower()
+        value = m.group(2).decode(errors="replace").strip()
         if label in label_to_key:
             out[label_to_key[label]] = value
     return out
