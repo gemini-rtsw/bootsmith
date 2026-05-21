@@ -197,33 +197,69 @@
         input.focus();
       }
 
-      function start(profile) {
-        stop();
-        lastProfile = profile;
-        const pre = document.getElementById("serial");
-        console.log("[bootsmith] opening WebSocket for", profile);
+      let wsKeepalive = null;
+      let wsReconnectTimer = null;
+      let wsShouldStayOpen = false;
 
+      function openWS() {
+        const pre = document.getElementById("serial");
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        ws = new WebSocket(proto + "//" + location.host + "/ws/terminal");
+        console.log("[bootsmith] opening WebSocket");
+        try {
+          ws = new WebSocket(proto + "//" + location.host + "/ws/terminal");
+        } catch (e) {
+          console.warn("[bootsmith] ws ctor error", e);
+          scheduleWSReconnect();
+          return;
+        }
         ws.binaryType = "arraybuffer";
-        ws.onopen = () => console.log("[bootsmith] ws open");
+        ws.onopen = () => {
+          console.log("[bootsmith] ws open");
+          if (wsKeepalive) clearInterval(wsKeepalive);
+          wsKeepalive = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              try { ws.send("ping"); } catch (_) {}
+            }
+          }, 20000);
+        };
         ws.onmessage = (ev) => {
           if (typeof ev.data === "string") {
-            // Control messages: "EVT disconnected", "ERR ..."
             console.log("[bootsmith] ws msg:", ev.data);
             return;
           }
           if (pre) bytesAppendRaw(pre, new Uint8Array(ev.data));
         };
-        ws.onclose = () => console.log("[bootsmith] ws closed");
+        ws.onclose = () => {
+          console.log("[bootsmith] ws closed");
+          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
+          ws = null;
+          if (wsShouldStayOpen) scheduleWSReconnect();
+        };
         ws.onerror = (e) => console.warn("[bootsmith] ws error", e);
+      }
 
+      function scheduleWSReconnect() {
+        if (wsReconnectTimer || !wsShouldStayOpen) return;
+        wsReconnectTimer = setTimeout(() => {
+          wsReconnectTimer = null;
+          if (wsShouldStayOpen) openWS();
+        }, 1000);
+      }
+
+      function start(profile) {
+        stop();
+        lastProfile = profile;
+        wsShouldStayOpen = true;
+        openWS();
         poll();
         pollTimer = setInterval(poll, 500);
         bindTerminal();
       }
 
       function stop() {
+        wsShouldStayOpen = false;
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
         if (ws) { try { ws.close(); } catch (_) {} ws = null; }
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         lastProfile = null;
