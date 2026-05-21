@@ -245,6 +245,31 @@ button.danger {
   border-color: var(--accent);
 }
 
+.params-view {
+  margin-top: 0.4rem;
+}
+.params-view > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+  user-select: none;
+  padding: 0.2rem 0;
+}
+.params-view > summary:hover { color: var(--accent); }
+.params-text {
+  background: #07090d;
+  color: #cfd6e1;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  padding: 0.6rem 0.8rem;
+  margin: 0.3rem 0 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: pre;
+  overflow-x: auto;
+  user-select: text;
+}
+
 .params {
   margin-top: 1rem;
   padding: 0.75rem;
