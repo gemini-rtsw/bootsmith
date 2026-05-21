@@ -38,8 +38,44 @@ class SessionManager:
         existing = self._session
         if existing is not None:
             self.close()
-        transport = WTITransport(profile.wti_host, profile.wti_port)
-        transport.open()
+        # WTI side may not have realized the prior session ended yet, or
+        # the board may be mid-boot and not forwarding. Retry the connect
+        # with backoff up to ~12s so the user doesn't have to spam the
+        # button.
+        import time as _t
+
+        last_err: Optional[Exception] = None
+        transport: Optional[WTITransport] = None
+        for delay in (0.0, 1.0, 2.0, 3.0, 5.0):
+            if delay:
+                _t.sleep(delay)
+            try:
+                transport = WTITransport(profile.wti_host, profile.wti_port)
+                transport.open(timeout=4.0)
+                # Probe: a CR should provoke either a prompt echo OR the
+                # WTI dropping us within ~1s if it doesn't actually want us.
+                _t.sleep(0.3)
+                try:
+                    transport.write(b"\r")
+                except Exception:
+                    pass
+                _t.sleep(1.5)
+                if transport.status().connected:
+                    break
+                # WTI dropped us — close and retry.
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+                transport = None
+            except Exception as e:
+                last_err = e
+                transport = None
+        if transport is None:
+            raise ConnectionError(
+                f"could not get a stable connection to {profile.wti_host}:{profile.wti_port}"
+                + (f" ({last_err})" if last_err else "")
+            )
         watcher = BannerWatcher(transport, profile)
         watcher.start()
         with self._lock:
