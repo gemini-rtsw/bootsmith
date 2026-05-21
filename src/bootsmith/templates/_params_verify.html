@@ -28,8 +28,8 @@
           class="inline">
       <button type="submit" class="primary">Boot (@)</button>
     </form>
-    <form hx-get="/params" hx-target="#params" hx-swap="outerHTML" class="inline">
-      <button type="submit">Re-edit</button>
+    <form hx-get="/params/edit" hx-target="#params" hx-swap="outerHTML" class="inline">
+      <button type="submit">Edit</button>
     </form>
     <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
       <button type="submit" class="danger">Disconnect (leave at prompt)</button>

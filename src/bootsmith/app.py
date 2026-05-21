@@ -112,6 +112,19 @@ def create_app() -> Flask:
         if has_param_fields or loader_changed:
             existing.boot_params = new_params
         profiles_mod.save_profile(existing)
+        # If the edit was triggered from inside an active session, return
+        # the params panel so we don't blow away the session view.
+        if request.headers.get("X-Return") == "params":
+            sessions: SessionManager = app.config["sessions"]
+            sess = sessions.current()
+            if sess is not None:
+                sess.profile = existing
+            fields = schemas_mod.fields_for(existing.loader_hint)
+            return render_template(
+                "_params_push.html",
+                profile=existing,
+                fields=fields,
+            )
         return _render_profile_list()
 
     @app.post("/session/open")
@@ -221,10 +234,29 @@ def create_app() -> Flask:
         sess = sessions.current()
         if sess is None:
             return _error("no session open"), 404
-        fields = schemas_mod.fields_for(sess.profile.loader_hint)
+        # Pull a fresh profile from disk so edits made via /params/edit
+        # show up here right away.
+        profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
+        sess.profile = profile
+        fields = schemas_mod.fields_for(profile.loader_hint)
         return render_template(
             "_params_push.html",
-            profile=sess.profile,
+            profile=profile,
+            fields=fields,
+        )
+
+    @app.get("/params/edit")
+    def params_edit():
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
+        sess.profile = profile
+        fields = schemas_mod.fields_for(profile.loader_hint)
+        return render_template(
+            "_params_edit.html",
+            profile=profile,
             fields=fields,
         )
 

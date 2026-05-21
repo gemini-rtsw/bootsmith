@@ -1,0 +1,14 @@
+{% from "_profile_form_fields.html" import boot_param_fields %}
+<section class="params" id="params">
+  <h3>Edit boot params for {{ profile.name }}</h3>
+  <form hx-post="/profiles/{{ profile.name }}/update"
+        hx-target="#params"
+        hx-swap="outerHTML"
+        hx-headers='{"X-Return": "params"}'>
+    {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
+    <div class="controls">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" hx-get="/params" hx-target="#params" hx-swap="outerHTML">Cancel</button>
+    </div>
+  </form>
+</section>

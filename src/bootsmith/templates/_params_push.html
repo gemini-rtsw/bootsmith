@@ -21,6 +21,9 @@
             class="inline">
         <button type="submit" class="primary">Push to board</button>
       </form>
+      <form hx-get="/params/edit" hx-target="#params" hx-swap="outerHTML" class="inline">
+        <button type="submit">Edit</button>
+      </form>
       <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
         <button type="submit" class="danger">Disconnect</button>
       </form>
@@ -28,9 +31,12 @@
   {% else %}
     <div class="error">
       <strong>This profile has no boot params saved.</strong>
-      Disconnect, click <em>Edit</em> on the profile, and fill in the boot fields.
+      Click Edit below to fill them in.
     </div>
     <div class="controls">
+      <form hx-get="/params/edit" hx-target="#params" hx-swap="outerHTML" class="inline">
+        <button type="submit" class="primary">Edit</button>
+      </form>
       <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
         <button type="submit" class="danger">Disconnect</button>
       </form>
