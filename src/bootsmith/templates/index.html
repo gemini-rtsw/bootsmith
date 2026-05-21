@@ -264,7 +264,7 @@
         wsShouldStayOpen = true;
         openWS();
         poll();
-        pollTimer = setInterval(poll, 500);
+        pollTimer = setInterval(poll, 2000);
         bindTerminal();
       }
 
@@ -291,7 +291,16 @@
 
       // Run on initial load and after every htmx swap.
       document.addEventListener("DOMContentLoaded", reconcile);
-      document.body.addEventListener("htmx:afterSwap", reconcile);
+      document.body.addEventListener("htmx:afterSwap", (e) => {
+        reconcile();
+        // Belt-and-suspenders: explicitly re-process the swapped element
+        // so any hx-* attributes in the new content get bound. htmx
+        // usually does this automatically, but it's been observed to
+        // miss after several consecutive swaps of the same target.
+        if (e.detail && e.detail.target && window.htmx) {
+          try { window.htmx.process(e.detail.target); } catch (_) {}
+        }
+      });
     })();
   </script>
 </body>
