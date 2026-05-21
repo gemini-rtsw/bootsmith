@@ -27,7 +27,7 @@
           </div>
           {% if p.boot_params %}
             <details class="params-view">
-              <summary>View params (copy-paste)</summary>
+              <summary>View params</summary>
               <pre class="params-text">{% for label, key in schemas.get(p.loader_hint, ()) -%}
 {% if p.boot_params.get(key) %}{{ label }}: {{ p.boot_params[key] }}
 {% endif %}{%- endfor %}</pre>
