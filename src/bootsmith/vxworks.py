@@ -186,9 +186,12 @@ def write_params(
 
     q = transport.subscribe(seed_history=False)
     last_label: Optional[bytes] = None
+    iters = 0
+    _log(f"write_params: sending c\\r (values keys: {list(values.keys())})")
     try:
         transport.write(b"c\r")
         for _ in range(64):
+            iters += 1
             # Wait for the next prompt. To avoid mis-targeting (responding
             # to the same prompt twice, or matching an echo of our reply),
             # require that the tail of the buffer ends with a label:...
@@ -213,9 +216,13 @@ def write_params(
                 time.sleep(0.02)
 
             if dialogue_closed:
+                _log(f"write_params: dialogue closed after {iters} iters")
                 break
             if label_match is None:
-                _log("timed out waiting for next prompt; sending ^D to bail")
+                _log(
+                    f"write_params: timed out (iter {iters}) waiting for next prompt; "
+                    f"tail={bytes(raw_buf[-200:])!r}"
+                )
                 try:
                     transport.write(b"\x04")
                 except Exception:
