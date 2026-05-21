@@ -200,11 +200,14 @@
       let wsKeepalive = null;
       let wsReconnectTimer = null;
       let wsShouldStayOpen = false;
+      let wsBackoff = 1000;
+      let wsLastOpenAt = 0;
 
       function openWS() {
         const pre = document.getElementById("serial");
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         console.log("[bootsmith] opening WebSocket");
+        wsLastOpenAt = Date.now();
         try {
           ws = new WebSocket(proto + "//" + location.host + "/ws/terminal");
         } catch (e) {
@@ -215,6 +218,7 @@
         ws.binaryType = "arraybuffer";
         ws.onopen = () => {
           console.log("[bootsmith] ws open");
+          wsBackoff = 1000; // reset on a stable open
           if (wsKeepalive) clearInterval(wsKeepalive);
           wsKeepalive = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -233,6 +237,13 @@
           console.log("[bootsmith] ws closed");
           if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
           ws = null;
+          // If the WS closed very quickly after opening, the server is
+          // probably rejecting us (no session yet). Back off so we don't
+          // hammer it.
+          const lived = Date.now() - wsLastOpenAt;
+          if (lived < 500) {
+            wsBackoff = Math.min(wsBackoff * 2, 10000);
+          }
           if (wsShouldStayOpen) scheduleWSReconnect();
         };
         ws.onerror = (e) => console.warn("[bootsmith] ws error", e);
@@ -243,7 +254,7 @@
         wsReconnectTimer = setTimeout(() => {
           wsReconnectTimer = null;
           if (wsShouldStayOpen) openWS();
-        }, 1000);
+        }, wsBackoff);
       }
 
       function start(profile) {
