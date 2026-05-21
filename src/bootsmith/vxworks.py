@@ -127,6 +127,25 @@ def read_params(transport: WTITransport, timeout: float = 6.0) -> ReadResult:
     return ReadResult(params=parsed, raw=raw)
 
 
+def _discover_field_order(transport: WTITransport, timeout: float = 4.0) -> list[tuple[str, str]]:
+    """Run `p` and return the (label, key) tuples in the order this firmware
+    prints them. Some firmware skips fields (e.g. unit_number on dc devices).
+    Returning the actual visible order lets write_params walk the dialogue
+    in lock-step without having to identify each prompt by label.
+    """
+    raw = _command(transport, b"p\r", timeout=timeout)
+    label_set = {label: key for label, key in FIELDS_WITH_UNIT}
+    out: list[tuple[str, str]] = []
+    for line in re.split(rb"[\r\n]+", raw):
+        m = re.match(rb"^[ \t]*([A-Za-z][^:\r\n]*?)\s*:[ \t]*(.*?)[ \t\r]*$", line)
+        if m is None:
+            continue
+        label = m.group(1).decode(errors="replace").strip()
+        if label in label_set:
+            out.append((label, label_set[label]))
+    return out
+
+
 def write_params(
     transport: WTITransport,
     values: dict[str, str],
@@ -155,53 +174,36 @@ def write_params(
     raw_buf = bytearray()
     fields_written: list[str] = []
 
-    # Build a "next prompt OR end-of-dialogue" matcher once. Some firmware
-    # variants skip fields that don't apply (e.g. unit_number on a dc/geisc
-    # board), so the dialogue is not a fixed sequence — it's whichever
-    # subset of fields this firmware decides to show, in any order. We
-    # match the next prompt by label, look up the field, send the value,
-    # repeat until the [VxWorks Boot]: prompt comes back.
-    label_to_key = {label: key for label, key in FIELDS_WITH_UNIT}
-    # Sort labels longest-first so the regex prefers the most specific match
-    # (e.g. matches "ftp password (pw) (blank = use rsh)" before any prefix
-    # of it). re.search returns the first match in the string, so we apply
-    # the regex to the LAST line of the buffer only — that line is the
-    # prompt the dialogue is currently sitting at.
-    labels_sorted = sorted(
-        (label for label, _ in FIELDS_WITH_UNIT), key=len, reverse=True
-    )
-    labels_alt = b"|".join(re.escape(l.encode()) for l in labels_sorted)
-    # Match a label followed by colon. findall gives matches in order;
-    # the last one in the buffer is the prompt the dialogue is currently
-    # sitting at.
-    next_prompt_re = re.compile(rb"(" + labels_alt + rb")\s*:")
+    # Discover the field order this firmware actually shows by running `p`
+    # first. The schema FIELDS_WITH_UNIT is the union of fields across
+    # firmware variants; any specific firmware may show only a subset.
+    # Walking the dialogue in the discovered order means we don't have to
+    # identify each prompt by label — we KNOW what field is being prompted
+    # because we counted them.
+    try:
+        order = _discover_field_order(transport, timeout=timeout_per_field)
+    except Exception as e:
+        _log(f"discover_field_order failed: {e}; falling back to full schema")
+        order = list(FIELDS_WITH_UNIT)
+    _log(f"write_params: discovered field order ({len(order)}): {[k for _, k in order]}")
 
-    # Regex that anchors to the END of buffer: "<label> : <something>" with
-    # no trailing newline. That's what the dialogue looks like when it's
-    # waiting for input — the colon, optional current value, no CR/LF yet.
-    pending_prompt_re = re.compile(
-        rb"(" + labels_alt + rb")\s*:[^\r\n]*\Z"
-    )
     end_prompt_re = re.compile(rb"\[VxWorks Boot\]:\s*\Z")
+    # A prompt is "label : ..." at end of buffer. We only use it as a
+    # "yes a prompt arrived" gate; the label we trust is the one from `order`.
+    any_prompt_re = re.compile(rb":\s*[^\r\n]*\Z")
 
     q = transport.subscribe(seed_history=False)
-    last_label: Optional[bytes] = None
     last_responded_at_len = 0
     iters = 0
     _log(f"write_params: sending c\\r (values keys: {list(values.keys())})")
     try:
         transport.write(b"c\r")
-        for _ in range(64):
+        for label, key in order:
             iters += 1
-            # Wait for the next prompt. To avoid mis-targeting we require
-            # BOTH (a) the tail ends with label:... AND (b) the buffer has
-            # grown past where we last responded (so we're not matching an
-            # echo of our own reply or the prior iteration's prompt).
-            # The "label differs from last" gate is dropped: the firmware
-            # legitimately re-prompts the same label after 'invalid number.'
-            # and we MUST respond to it the second time too.
+            # Wait for the next prompt to arrive: tail ends with ":..."
+            # and buffer has grown past last response.
             deadline = time.time() + timeout_per_field
-            label_match: Optional[bytes] = None
+            arrived = False
             dialogue_closed = False
             while time.time() < deadline:
                 while q:
@@ -213,19 +215,18 @@ def write_params(
                 if end_prompt_re.search(tail):
                     dialogue_closed = True
                     break
-                m = pending_prompt_re.search(tail)
-                if m is not None:
-                    label_match = m.group(1)
+                if any_prompt_re.search(tail):
+                    arrived = True
                     break
                 time.sleep(0.02)
 
             if dialogue_closed:
-                _log(f"write_params: dialogue closed after {iters} iters")
+                _log(f"write_params: dialogue closed early after {iters} of {len(order)}")
                 break
-            if label_match is None:
+            if not arrived:
                 _log(
-                    f"write_params: timed out (iter {iters}) waiting for next prompt; "
-                    f"tail={bytes(raw_buf[-200:])!r}"
+                    f"write_params: timed out (iter {iters}/{len(order)}) "
+                    f"waiting for prompt for {label!r}; tail={bytes(raw_buf[-200:])!r}"
                 )
                 try:
                     transport.write(b"\x04")
@@ -233,57 +234,33 @@ def write_params(
                     pass
                 break
 
-            label = label_match.decode()
-            key = label_to_key.get(label)
-            if key is None:
-                transport.write(b"\r")
-                continue
-
             raw_value = values.get(key, "")
-            _log(f"iter {iters}: matched {label!r} (key={key}) -> sending {raw_value!r}")
+            _log(f"iter {iters}: prompt for {label!r} (key={key}) -> sending {raw_value!r}")
             if raw_value == "":
                 transport.write(b"\r")
             elif raw_value == ".":
                 transport.write(b".\r")
                 fields_written.append(key)
             else:
-                # Type the value one character at a time with a small delay
-                # between each. The VxWorks dialogue has a tiny input buffer
-                # and bursting a long value (e.g. 50-char path) causes
-                # characters to be dropped or interleaved with prompt echo,
-                # which corrupts BOTH this field and the next.
-                # Backspaces don't work in this loader, so once corrupted
-                # the value is stuck until another c-run.
+                # Slow-type to avoid input-buffer overrun on this firmware.
                 for ch in raw_value.encode():
                     transport.write(bytes([ch]))
-                    time.sleep(0.015)  # ~67 chars/sec, slow enough for the ROM
+                    time.sleep(0.015)
                 transport.write(b"\r")
-                # Wait until our typed value has been echoed back into the
-                # buffer. The board echoes each char before it processes the
-                # CR. If we move on before that, the next prompt's bytes get
-                # interleaved with the tail of our echo.
+                # Wait for the echo of our typed value before considering
+                # this field done, so we don't blur into the next prompt.
                 want_echo = raw_value.encode()
-                deadline = time.time() + 4.0
-                while time.time() < deadline:
+                edl = time.time() + 4.0
+                while time.time() < edl:
                     while q:
                         raw_buf.extend(q.popleft())
-                    # Look for the echoed value in the recent buffer tail.
                     if want_echo in bytes(raw_buf[-(len(want_echo) + 100):]):
                         break
                     time.sleep(0.02)
                 fields_written.append(key)
-            # Remember where the buffer was after our response. Next iteration
-            # only matches a prompt if the buffer has grown PAST this point.
             last_responded_at_len = len(raw_buf)
-            last_label = label_match
-        else:
-            _log("dialogue exceeded 64 iterations; bailing with ^D")
-            try:
-                transport.write(b"\x04")
-            except Exception:
-                pass
 
-        # Make sure we end at the loader prompt before returning.
+        # Drain to the closing [VxWorks Boot]: prompt.
         if not PROMPT_RE.search(bytes(raw_buf[-512:])):
             _read_until(q, PROMPT_RE, timeout=3.0, accumulator=raw_buf)
     finally:

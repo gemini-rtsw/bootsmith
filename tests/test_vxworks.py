@@ -118,15 +118,27 @@ def _run_dialogue(t: FakeTransport, values: dict[str, str]) -> None:
     th = threading.Thread(target=runner, daemon=True)
     th.start()
 
-    # Wait for the driver to send `c\r`, then start the dialogue.
+    # Wait for the driver to send `p\r` (field-order discovery), reply
+    # with a fake `p` output containing all known fields, then wait for
+    # `c\r` and walk the dialogue.
     deadline = time.time() + 2.0
     while not t.writes and time.time() < deadline:
         time.sleep(0.02)
-    assert t.writes and t.writes[0] == b"c\r", f"first write was {t.writes!r}"
+    assert t.writes and t.writes[0] == b"p\r", f"first write was {t.writes!r}"
 
-    # For each prompt, wait until the driver issues a CR write, THEN
-    # push the next prompt. The driver may slow-type chars one-by-one
-    # before the CR; we treat the CR as the "done responding" signal.
+    # Synthesize a p-output covering all fields, then the closing prompt.
+    fake_p = b"\r\n"
+    for label, _key in FIELDS_WITH_UNIT:
+        fake_p += f"{label:21}: current\r\n".encode()
+    fake_p += b"\r\n[VxWorks Boot]: "
+    t.push(fake_p)
+
+    # Wait for `c\r`.
+    deadline = time.time() + 2.0
+    while (len(t.writes) < 2 or t.writes[1] != b"c\r") and time.time() < deadline:
+        time.sleep(0.02)
+    assert len(t.writes) >= 2 and t.writes[1] == b"c\r", f"second write was {t.writes[1:]!r}"
+
     for i, (label, _key) in enumerate(FIELDS_WITH_UNIT):
         prev = len(t.writes)
         t.push(f"\r\n{label}          : current_{i} ".encode())
@@ -151,10 +163,11 @@ class VxWorksDialogueTests(unittest.TestCase):
     def test_blank_means_keep_sends_only_cr(self):
         t = FakeTransport()
         _run_dialogue(t, values={})
-        # First write is the `c\r` to enter dialogue; every subsequent write
-        # should be just `\r` (keep current) for every field.
-        self.assertEqual(t.writes[0], b"c\r")
-        field_writes = t.writes[1 : 1 + len(FIELDS_WITH_UNIT)]
+        # writes[0] is `p\r` (discovery), writes[1] is `c\r` (dialogue),
+        # then one `\r` per field (keep current).
+        self.assertEqual(t.writes[0], b"p\r")
+        self.assertEqual(t.writes[1], b"c\r")
+        field_writes = t.writes[2 : 2 + len(FIELDS_WITH_UNIT)]
         self.assertEqual(
             field_writes,
             [b"\r"] * len(FIELDS_WITH_UNIT),
@@ -178,13 +191,13 @@ class VxWorksDialogueTests(unittest.TestCase):
         self.assertIn(b"mkogmosdev-lv1\r", joined)
 
     def test_other_fields_still_kept_when_one_set(self):
-        # If you set host_name to "x" and leave everything else blank,
-        # we should see `c\r` (enter dialogue) + `x` + `\r` (the value)
-        # + several `\r` (keep current for other fields).
         t = FakeTransport()
         _run_dialogue(t, values={"host_name": "x"})
         joined = b"".join(t.writes)
-        self.assertTrue(joined.startswith(b"c\r"))
+        # Starts with `p\r` (discovery), then `c\r` (dialogue), then
+        # value writes interleaved with keep-current `\r`s.
+        self.assertTrue(joined.startswith(b"p\r"))
+        self.assertIn(b"c\r", joined)
         self.assertIn(b"x\r", joined)
 
 
