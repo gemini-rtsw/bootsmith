@@ -31,19 +31,12 @@
   </div>
 
   <div class="controls">
-    <form hx-post="/session/force-prompt" hx-swap="none" class="inline">
-      <button type="submit" title="Sends CR and tries to match a loader prompt — use if the board is already halted">Force prompt</button>
-    </form>
     <form hx-post="/session/rearm" hx-swap="none" class="inline" id="rearm-form" style="display:none">
       <button type="submit" class="primary" title="Reset watcher to waiting state so you can reboot again">Re-arm</button>
     </form>
     <form hx-post="/session/reconnect" hx-swap="none" class="inline" id="reconnect-form" style="display:none">
       <button type="submit" class="primary" title="The WTI dropped our socket. Reopen it.">Reconnect</button>
     </form>
-    <label class="terminal-mode-toggle">
-      <input type="checkbox" id="terminal-raw" />
-      <span title="Send each keystroke immediately. When off, sends the line on Enter.">raw key mode</span>
-    </label>
   </div>
 
   <p class="hint">

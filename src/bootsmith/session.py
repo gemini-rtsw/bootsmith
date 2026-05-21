@@ -45,24 +45,23 @@ class SessionManager:
         with self._lock:
             self._session = Session(profile=profile, transport=transport, watcher=watcher)
 
-        # Auto-prompt: after IAC negotiation settles, send a single CR to
-        # nudge the board into echoing whatever prompt it has. Runs once
-        # and exits. No retries, no ^D — both caused races with in-flight
-        # Push-to-board c-dialogues (rogue ^D in the middle of a field).
-        # If the user lands on a board mid-dialogue or with no prompt
-        # visible, the Force prompt button is one click away.
+        # Auto-prompt: nudge the board into echoing its prompt so the user
+        # doesn't have to click anything after connecting. Try multiple
+        # times because the IAC handshake timing varies. Stops as soon as
+        # the watcher reports at_prompt.
         def _bump():
             import time as _t
 
-            _t.sleep(0.8)
-            if watcher.status().state == "at_prompt":
-                return
-            try:
-                transport.write(b"\r")
-                _t.sleep(0.5)
-                watcher.force_prompt()
-            except Exception:
-                return
+            for delay in (0.8, 0.6, 1.0, 1.5):
+                _t.sleep(delay)
+                if watcher.status().state == "at_prompt":
+                    return
+                try:
+                    transport.write(b"\r")
+                    _t.sleep(0.5)
+                    watcher.force_prompt()
+                except Exception:
+                    return
 
         threading.Thread(target=_bump, name="auto-prompt", daemon=True).start()
         return self._session
