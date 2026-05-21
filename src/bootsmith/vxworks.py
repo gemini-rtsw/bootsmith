@@ -266,15 +266,31 @@ def boot(transport: WTITransport) -> None:
 def _command(transport: WTITransport, cmd: bytes, timeout: float) -> bytes:
     """Send a command and read bytes until the next prompt is seen.
 
-    Returns the raw bytes received (including command echo).
+    Requires the command to be echoed back before declaring the next prompt
+    match valid — otherwise a stray prompt already in flight on the line
+    can short-circuit the read before the command's output arrives.
     """
     q = transport.subscribe(seed_history=False)
     buf = bytearray()
+    cmd_echo = cmd.replace(b"\r", b"").replace(b"\n", b"")
     try:
         transport.write(cmd)
-        chunk = _read_until(q, pattern=PROMPT_RE, timeout=timeout, accumulator=buf)
-        if chunk is None:
-            _log(f"command {cmd!r} timed out after {timeout}s waiting for prompt")
+        deadline = time.time() + timeout
+        saw_echo = False
+        while time.time() < deadline:
+            while q:
+                buf.extend(q.popleft())
+            if not saw_echo and cmd_echo and cmd_echo in buf:
+                saw_echo = True
+            if saw_echo:
+                # Look for the closing prompt at the very tail, AFTER the
+                # command's echo position. Avoids matching a prompt that
+                # was already on the line before we sent the command.
+                tail = bytes(buf[-512:])
+                if PROMPT_RE.search(tail):
+                    return bytes(buf)
+            time.sleep(0.02)
+        _log(f"command {cmd!r} timed out after {timeout}s waiting for prompt")
     finally:
         transport.unsubscribe(q)
     return bytes(buf)
