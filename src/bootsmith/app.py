@@ -234,13 +234,17 @@ def create_app() -> Flask:
         """WebSocket: bidirectional terminal pipe.
 
         Bytes from the board come down as binary messages.
-        Bytes typed by the user go up as binary messages and are written
+        Bytes typed by the user go up as binary messages and get written
         to the transport. Keepalive text messages ('ping') are tolerated
         but ignored. Closing the WS does NOT close the Bootsmith session.
+
+        IMPORTANT: ws.send and ws.receive must be called from the SAME
+        thread. Splitting them across threads (one pumping board→browser,
+        one handling browser→board) corrupts the WS framing and closes
+        the connection silently. So we use a non-blocking receive and
+        poll the subscriber queue inside one loop.
         """
         import sys as _sys
-        import threading as _th
-        import time as _t
 
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
@@ -254,7 +258,6 @@ def create_app() -> Flask:
         transport = sess.transport
         q = transport.subscribe(seed_history=True)
 
-        # Snapshot first so reload starts with recent history.
         try:
             snap = transport.snapshot()
             if snap:
@@ -263,40 +266,36 @@ def create_app() -> Flask:
             transport.unsubscribe(q)
             return
 
-        stop = _th.Event()
-
-        def pump_in():
-            """Forward bytes received from the board to the browser."""
-            while not stop.is_set():
-                if q:
+        try:
+            while True:
+                # Drain any board-to-browser bytes first.
+                sent_any = False
+                while q:
                     chunk = q.popleft()
                     try:
                         ws.send(chunk)
-                    except Exception:
-                        stop.set()
+                        sent_any = True
+                    except Exception as e:
+                        print(f"[ws] send failed: {e}", file=_sys.stderr, flush=True)
                         return
-                else:
-                    _t.sleep(0.02)
+
+                # Non-blocking receive for browser-to-board.
+                try:
+                    msg = ws.receive(timeout=0.02)
+                except Exception as e:
+                    print(f"[ws] receive failed: {e}", file=_sys.stderr, flush=True)
+                    return
+                if msg is None:
                     if not transport.status().connected:
-                        # Tell the client; let it decide whether to reconnect.
                         try:
                             ws.send("EVT disconnected")
                         except Exception:
                             pass
                         return
-
-        t = _th.Thread(target=pump_in, name="ws-pump-in", daemon=True)
-        t.start()
-
-        try:
-            while not stop.is_set():
-                msg = ws.receive(timeout=None)
-                if msg is None:
-                    break
+                    continue
                 if isinstance(msg, str):
                     if msg == "ping":
                         continue
-                    # Treat any other text as raw chars (rare path).
                     data = msg.encode("utf-8", errors="replace")
                 else:
                     data = msg
@@ -310,9 +309,8 @@ def create_app() -> Flask:
                         ws.send(f"ERR write failed: {e}")
                     except Exception:
                         pass
-                    break
+                    return
         finally:
-            stop.set()
             transport.unsubscribe(q)
 
     @app.get("/params")
