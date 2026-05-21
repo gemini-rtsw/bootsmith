@@ -256,13 +256,22 @@ def create_app() -> Flask:
             return
 
         transport = sess.transport
-        q = transport.subscribe(seed_history=True)
+        # Don't seed with history on the WS subscriber — we'll send the
+        # snapshot once, in chunks, then any new bytes come via the queue.
+        # Seeding the queue duplicates the snapshot bytes.
+        q = transport.subscribe(seed_history=False)
 
         try:
             snap = transport.snapshot()
-            if snap:
-                ws.send(snap)
-        except Exception:
+            # Chunk the snapshot into ~4 KB frames. simple-websocket gets
+            # cranky with very large initial binary frames ('Invalid frame
+            # header' on the client side).
+            CHUNK = 4096
+            for i in range(0, len(snap), CHUNK):
+                ws.send(bytes(snap[i : i + CHUNK]))
+        except Exception as _e:
+            import sys as _sys
+            print(f"[ws] snapshot send failed: {_e}", file=_sys.stderr, flush=True)
             transport.unsubscribe(q)
             return
 
