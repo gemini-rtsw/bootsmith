@@ -189,25 +189,38 @@ def write_params(
     any_prompt_re = re.compile(rb":\s*[^\r\n]*\Z")
 
     q = transport.subscribe(seed_history=False)
-    last_responded_at_len = 0
+    # prev_prompt_start: byte offset in raw_buf where the line of the
+    # prompt we LAST responded to began. The next field's prompt must
+    # begin strictly after that. Starts at -1 meaning "no prior prompt".
+    prev_prompt_start = -1
     iters = 0
-    _log("write_params: BUILD=e18eb09+sentinel (growth-only gate)")
+    _log("write_params: BUILD=prompt-line-anchor")
     _log(f"write_params: sending c\\r (values keys: {list(values.keys())})")
+
+    def _last_line_start(buf: bytes) -> int:
+        """Index of the start of the last line in buf. Treats either
+        \\r or \\n as a line separator (some VxWorks firmware emits
+        bare \\r between dialogue prompts)."""
+        i = max(buf.rfind(b"\n"), buf.rfind(b"\r"))
+        return i + 1 if i >= 0 else 0
+
     try:
         transport.write(b"c\r")
         for label, key in order:
             iters += 1
-            # Wait for the next prompt to arrive. Criterion: the buffer
-            # has grown since we finished writing iter N-1's response,
-            # AND the tail ends in a "label : value" prompt. After we
-            # write a response the board echoes it (drained by the
-            # echo-wait below before we set last_responded_at_len), so
-            # at that mark the tail does NOT end in a prompt. Any later
-            # tail-prompt-match therefore came from new output, which
-            # is the next field's prompt.
+            # Wait for the next field's prompt. We accept a tail-match of
+            # any_prompt_re as soon as the prompt line starts STRICTLY
+            # AFTER prev_prompt_start. That cleanly distinguishes:
+            #   - the prompt we already responded to (its line starts
+            #     at prev_prompt_start, so it does NOT pass the gate)
+            #   - the next field's prompt (its line starts later)
+            # The echo-wait may have pulled the next prompt into raw_buf
+            # already; in that case this check fires immediately on the
+            # first poll, which is fine — no growth required.
             deadline = time.time() + timeout_per_field
             arrived = False
             dialogue_closed = False
+            cur_prompt_start = -1
             while time.time() < deadline:
                 while q:
                     raw_buf.extend(q.popleft())
@@ -215,9 +228,12 @@ def write_params(
                 if end_prompt_re.search(tail):
                     dialogue_closed = True
                     break
-                if len(raw_buf) > last_responded_at_len and any_prompt_re.search(tail):
-                    arrived = True
-                    break
+                if any_prompt_re.search(tail):
+                    line_start = _last_line_start(bytes(raw_buf))
+                    if line_start > prev_prompt_start:
+                        cur_prompt_start = line_start
+                        arrived = True
+                        break
                 time.sleep(0.02)
 
             if dialogue_closed:
@@ -226,11 +242,12 @@ def write_params(
             if not arrived:
                 _tail = bytes(raw_buf[-200:])
                 _prompt_m = any_prompt_re.search(_tail)
+                _line_start = _last_line_start(bytes(raw_buf))
                 _log(
                     f"write_params: timed out (iter {iters}/{len(order)}) "
                     f"waiting for prompt for {label!r}; "
-                    f"len(raw_buf)={len(raw_buf)} last_responded_at_len={last_responded_at_len} "
-                    f"growth={len(raw_buf) - last_responded_at_len} "
+                    f"len(raw_buf)={len(raw_buf)} prev_prompt_start={prev_prompt_start} "
+                    f"last_line_start={_line_start} "
                     f"prompt_match={_prompt_m!r} "
                     f"tail={_tail!r}"
                 )
@@ -286,7 +303,7 @@ def write_params(
                         break
                     time.sleep(0.02)
                 fields_written.append(key)
-            last_responded_at_len = len(raw_buf)
+            prev_prompt_start = cur_prompt_start
 
         # Drain to the closing [VxWorks Boot]: prompt.
         if not PROMPT_RE.search(bytes(raw_buf[-512:])):
