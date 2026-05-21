@@ -187,6 +187,13 @@ class WTITransport:
     def status(self) -> TransportStatus:
         return self._status
 
+    def _log_subs(self, where: str) -> None:
+        print(
+            f"[transport {self.host}:{self.port}] {where}: "
+            f"subs={len(self._subscribers)}",
+            file=sys.stderr, flush=True,
+        )
+
     def subscribe(self, seed_history: bool = True) -> deque[bytes]:
         """Subscribe to incoming chunks.
 
@@ -204,6 +211,7 @@ class WTITransport:
             if seed_history:
                 for chunk in self._ring:
                     q.append(chunk)
+        self._log_subs(f"subscribe (id={id(q)})")
         return q
 
     def unsubscribe(self, q: deque[bytes]) -> None:
@@ -212,6 +220,7 @@ class WTITransport:
                 self._subscribers.remove(q)
             except ValueError:
                 pass
+        self._log_subs(f"unsubscribe (id={id(q)})")
 
     def snapshot(self) -> bytes:
         with self._lock:
@@ -282,5 +291,16 @@ class WTITransport:
                 while self._ring_len > self._ring_max and self._ring:
                     old = self._ring.popleft()
                     self._ring_len -= len(old)
+                subs_count = len(self._subscribers)
                 for q in self._subscribers:
                     q.append(chunk)
+            # Only log every Nth chunk to avoid spam; useful to see if
+            # the subscriber count drops mid-stream.
+            self._status.error  # noqa: keep
+            if self._status.bytes_in % 4096 < len(chunk):
+                print(
+                    f"[transport {self.host}:{self.port}] chunk fanout: "
+                    f"{len(chunk)}B -> {subs_count} subscribers "
+                    f"(total in={self._status.bytes_in}B)",
+                    file=sys.stderr, flush=True,
+                )
