@@ -231,24 +231,17 @@ def create_app() -> Flask:
 
     @sock.route("/ws/terminal")
     def ws_terminal(ws):
-        """WebSocket: bidirectional terminal pipe.
-
-        Bytes from the board come down as binary messages.
-        Bytes typed by the user go up as binary messages and get written
-        to the transport. Keepalive text messages ('ping') are tolerated
-        but ignored. Closing the WS does NOT close the Bootsmith session.
-
-        IMPORTANT: ws.send and ws.receive must be called from the SAME
-        thread. Splitting them across threads (one pumping board→browser,
-        one handling browser→board) corrupts the WS framing and closes
-        the connection silently. So we use a non-blocking receive and
-        poll the subscriber queue inside one loop.
-        """
+        """WebSocket: bidirectional terminal pipe."""
         import sys as _sys
+        import time as _t
+
+        ws_id = id(ws)
+        print(f"[ws {ws_id}] OPENED", file=_sys.stderr, flush=True)
 
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
         if sess is None:
+            print(f"[ws {ws_id}] no session; sending ERR and closing", file=_sys.stderr, flush=True)
             try:
                 ws.send("ERR no session open")
             except Exception:
@@ -256,55 +249,62 @@ def create_app() -> Flask:
             return
 
         transport = sess.transport
-        # Don't seed with history on the WS subscriber — we'll send the
-        # snapshot once, in chunks, then any new bytes come via the queue.
-        # Seeding the queue duplicates the snapshot bytes.
         q = transport.subscribe(seed_history=False)
+        print(f"[ws {ws_id}] subscribed to {transport.host}:{transport.port}", file=_sys.stderr, flush=True)
 
         try:
             snap = transport.snapshot()
-            # Chunk the snapshot into ~4 KB frames. simple-websocket gets
-            # cranky with very large initial binary frames ('Invalid frame
-            # header' on the client side).
             CHUNK = 4096
             for i in range(0, len(snap), CHUNK):
                 ws.send(bytes(snap[i : i + CHUNK]))
+            print(f"[ws {ws_id}] sent snapshot ({len(snap)}B)", file=_sys.stderr, flush=True)
         except Exception as _e:
-            import sys as _sys
-            print(f"[ws] snapshot send failed: {_e}", file=_sys.stderr, flush=True)
+            print(f"[ws {ws_id}] snapshot send failed: {_e}", file=_sys.stderr, flush=True)
             transport.unsubscribe(q)
             return
 
+        bytes_sent = 0
+        bytes_recvd = 0
+        last_log = _t.time()
+        exit_reason = "unknown"
         try:
             while True:
-                # If the underlying socket is closed, bail. simple_websocket
-                # exposes `connected`; if it goes False we must exit so the
-                # subscriber gets cleaned up and the client's reconnect can
-                # land on a fresh handler.
+                # Periodic alive-log every 10s so we can see hung-but-alive vs gone.
+                now = _t.time()
+                if now - last_log > 10:
+                    print(
+                        f"[ws {ws_id}] alive: connected={getattr(ws, 'connected', '?')} "
+                        f"sent={bytes_sent}B recvd={bytes_recvd}B q={len(q)}",
+                        file=_sys.stderr, flush=True,
+                    )
+                    last_log = now
+
                 if not getattr(ws, "connected", True):
-                    print("[ws] connection no longer reports connected; exiting", file=_sys.stderr, flush=True)
+                    exit_reason = "ws.connected is False"
                     return
 
-                # Drain any board-to-browser bytes first.
+                # Drain board→browser.
                 while q:
                     chunk = q.popleft()
                     try:
                         ws.send(chunk)
+                        bytes_sent += len(chunk)
                     except Exception as e:
-                        print(f"[ws] send failed: {e}", file=_sys.stderr, flush=True)
+                        exit_reason = f"send failed: {e}"
                         return
 
-                # Non-blocking receive for browser-to-board.
+                # Non-blocking receive for browser→board.
                 try:
                     msg = ws.receive(timeout=0.05)
                 except Exception as e:
-                    print(f"[ws] receive failed: {e}", file=_sys.stderr, flush=True)
+                    exit_reason = f"receive failed: {e}"
                     return
                 if msg is None:
-                    # Could be timeout (still connected) or close.
                     if not getattr(ws, "connected", True):
+                        exit_reason = "receive None + ws disconnected"
                         return
                     if not transport.status().connected:
+                        exit_reason = "transport disconnected"
                         try:
                             ws.send("EVT disconnected")
                         except Exception:
@@ -319,10 +319,11 @@ def create_app() -> Flask:
                     data = msg
                 if not data:
                     continue
+                bytes_recvd += len(data)
                 try:
                     transport.write(data)
                 except Exception as e:
-                    print(f"[ws] write failed: {e}", file=_sys.stderr, flush=True)
+                    exit_reason = f"transport write failed: {e}"
                     try:
                         ws.send(f"ERR write failed: {e}")
                     except Exception:
@@ -330,6 +331,10 @@ def create_app() -> Flask:
                     return
         finally:
             transport.unsubscribe(q)
+            print(
+                f"[ws {ws_id}] CLOSED reason={exit_reason} sent={bytes_sent}B recvd={bytes_recvd}B",
+                file=_sys.stderr, flush=True,
+            )
 
     @app.get("/params")
     def params_panel():
