@@ -46,7 +46,7 @@
               <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
               <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
               <label>Loader
-                <select name="loader_hint" required>
+                <select name="loader_hint" required data-edit-loader-select="{{ p.name }}">
                   {% if p.loader_hint not in loader_labels %}
                     <option value="" selected disabled>-- choose --</option>
                   {% endif %}
@@ -56,8 +56,10 @@
                 </select>
               </label>
             </div>
-            <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
-            {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+            <div id="edit-params-{{ p.name }}" data-edit-params-container>
+              <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
+              {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+            </div>
             <div class="row">
               <button type="submit" class="primary">Save</button>
             </div>
@@ -110,17 +112,35 @@
 
 <script>
   (function () {
-    const sel = document.getElementById("new-loader-select");
-    const target = document.getElementById("new-target-params");
-    if (!sel || !target) return;
-    sel.addEventListener("change", () => {
-      const tpl = document.getElementById("new-params-" + sel.value);
+    function swapInto(container, loader, headingPrefix) {
+      const tpl = document.getElementById("new-params-" + loader);
       if (tpl) {
-        target.innerHTML = "";
-        target.appendChild(tpl.content.cloneNode(true));
+        container.innerHTML = "";
+        container.appendChild(tpl.content.cloneNode(true));
       } else {
-        target.innerHTML = '<p class="hint">No fields defined for that loader yet.</p>';
+        container.innerHTML =
+          '<p class="hint">No fields defined for that loader yet.</p>';
       }
+    }
+
+    const newSel = document.getElementById("new-loader-select");
+    const newTarget = document.getElementById("new-target-params");
+    if (newSel && newTarget) {
+      newSel.addEventListener("change", () => {
+        swapInto(newTarget, newSel.value);
+      });
+    }
+
+    // Existing-profile edit forms: each loader <select> is tagged with
+    // data-edit-loader-select=<profile-name>, and the corresponding
+    // params container has id="edit-params-<profile-name>".
+    document.querySelectorAll("[data-edit-loader-select]").forEach((sel) => {
+      const name = sel.getAttribute("data-edit-loader-select");
+      const container = document.getElementById("edit-params-" + name);
+      if (!container) return;
+      sel.addEventListener("change", () => {
+        swapInto(container, sel.value);
+      });
     });
   })();
 </script>
