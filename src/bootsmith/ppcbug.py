@@ -318,14 +318,13 @@ def _walk(
     # Build a single regex that recognizes any field's prompt at the end
     # of the buffer. We can't gate the loop on a SPECIFIC label because
     # we want to detect dialogue closure (returning to PPC1-Bug>) too.
-    pending_prompt_re = re.compile(rb"=([^?\r\n]*)\?\s*\Z")
-    # PPCBug emits "Update Non-Volatile RAM (Y/N)?" at the end of NIOT
-    # (and sometimes ENV) when values were changed. We always answer Y
-    # to commit. We could also see "Reset Local System (Y/N)?" after
-    # ENV — we always say N (we don't want a reset; the user will boot
-    # explicitly afterward).
-    save_prompt_re = re.compile(rb"Update Non-Volatile RAM\s*\(Y/N\)\?\s*\Z")
-    reset_prompt_re = re.compile(rb"Reset Local System\s*\(Y/N\)\?\s*\Z")
+    # A field prompt is `LABEL =VALUE?` at the END of its line (no trailing
+    # newline — the board is waiting for input). We scan one line at a time
+    # rather than matching against the tail of raw_buf, because prompts
+    # can arrive in bursts and tail-matching skips intermediate prompts.
+    field_prompt_re = re.compile(rb"^([^=\r\n]+?)\s*=([^?\r\n]*)\?\s*$")
+    save_prompt_substr = b"Update Non-Volatile RAM"
+    reset_prompt_substr = b"Reset Local System"
     # For label extraction we grab the largest known label that ends
     # right before the `=` token.
     label_to_key = {label: key for label, key in fields}
@@ -335,197 +334,223 @@ def _walk(
     index_of_key = {k: i for i, (_l, k) in enumerate(fields)}
 
     q = transport.subscribe(seed_history=False)
-    prev_prompt_start = -1
-    iters = 0
+    # scan_pos: byte offset in raw_buf past which we haven't yet processed
+    # input. Every prompt the board emits has its terminating `?` at the
+    # end of its line. We find the next `?` past scan_pos (and confirm it
+    # ends a line — no more chars after it on that line), classify the
+    # prompt, respond, then advance scan_pos past the line.
+    scan_pos = 0
+    fields_processed = 0
     _log(f"_walk({command}): {len(fields)} fields; values keys present: "
          f"{[k for _, k in fields if k in values and values[k] != '']}")
+
+    def drain():
+        while q:
+            raw_buf.extend(q.popleft())
 
     try:
         transport.write(f"{command}\r".encode())
 
-        while iters < len(fields) + 4:  # +4 slack for stray prompts
-            iters += 1
-            # Wait for the next prompt or dialogue close.
+        # Each outer iteration: wait for the next "actionable" event past
+        # scan_pos -- either a complete prompt line ending in `?`, or the
+        # PPC1-Bug> exit prompt at the tail.
+        while True:
+            if fields_processed > len(fields) + 8:  # safety bound
+                _log(f"_walk({command}): hit safety bound; bailing")
+                break
+
             deadline = time.time() + timeout
-            arrived = False
-            dialogue_closed = False
-            cur_prompt_start = -1
-            current_value: bytes = b""
+            event = None  # ('field', label, current_value, line_end) or ('save',) etc.
+
             while time.time() < deadline:
-                while q:
-                    raw_buf.extend(q.popleft())
-                tail = bytes(raw_buf[-512:])
-                if PROMPT_RE.search(tail):
-                    dialogue_closed = True
-                    break
-                # Handle PPCBug's "Update NVRAM?" / "Reset?" prompts
-                # that can appear before or instead of the next field.
-                if save_prompt_re.search(tail):
-                    _log(f"_walk({command}): answering Y to Update NVRAM prompt")
-                    try:
-                        transport.write(b"Y\r")
-                    except Exception:
-                        pass
-                    # Don't break the loop; keep waiting for either the
-                    # next field prompt or PPC1-Bug>. Advance prev_prompt
-                    # _start past this line so we don't re-match it.
-                    prev_prompt_start = _last_line_start(bytes(raw_buf))
-                    # Small grace period to let the response be echoed
-                    # before the next prompt arrives.
-                    time.sleep(0.1)
-                    continue
-                if reset_prompt_re.search(tail):
-                    _log(f"_walk({command}): answering N to Reset prompt")
-                    try:
-                        transport.write(b"N\r")
-                    except Exception:
-                        pass
-                    prev_prompt_start = _last_line_start(bytes(raw_buf))
-                    time.sleep(0.1)
-                    continue
-                m = pending_prompt_re.search(tail)
-                if m is not None:
-                    line_start = _last_line_start(bytes(raw_buf))
-                    if line_start > prev_prompt_start:
-                        cur_prompt_start = line_start
-                        current_value = m.group(1)
-                        arrived = True
+                drain()
+
+                # Look for next `?` at or past scan_pos, ON its own line
+                # (no chars after it on that line apart from whitespace).
+                qpos = raw_buf.find(b"?", scan_pos)
+                if qpos >= 0:
+                    # Confirm the rest of this line (until line break or
+                    # end-of-buffer) is whitespace only. If the line break
+                    # hasn't arrived yet that's fine -- the `?` is the
+                    # last char so far, meaning the board has stopped
+                    # writing and is waiting for input.
+                    j = qpos + 1
+                    line_break_seen = False
+                    valid_prompt = True
+                    while j < len(raw_buf):
+                        c = raw_buf[j]
+                        if c in (0x0A, 0x0D):
+                            line_break_seen = True
+                            break
+                        if c not in (0x20, 0x09):
+                            valid_prompt = False
+                            break
+                        j += 1
+                    if valid_prompt:
+                        # Extract the line: from the previous line break
+                        # (or scan_pos) up to qpos+1.
+                        line_start = scan_pos
+                        # Find start of this line within raw_buf >= scan_pos.
+                        k = qpos
+                        while k > scan_pos:
+                            if raw_buf[k - 1] in (0x0A, 0x0D):
+                                break
+                            k -= 1
+                        line_start = k
+                        line = bytes(raw_buf[line_start : qpos + 1])
+                        # Determine where to advance scan_pos past this
+                        # prompt. If the line break has arrived, advance
+                        # past it; otherwise just past the `?` (the next
+                        # bytes will be the board's response to OUR input
+                        # plus the next prompt).
+                        if line_break_seen:
+                            # Skip the \r and any immediately following \n.
+                            advance_to = j + 1
+                            if raw_buf[j] == 0x0D and j + 1 < len(raw_buf) and raw_buf[j + 1] == 0x0A:
+                                advance_to = j + 2
+                        else:
+                            advance_to = qpos + 1
+                        event = ("prompt", line, advance_to)
                         break
+
+                # No prompt yet. Check if the board has returned to
+                # PPC1-Bug> (dialogue ended). Look at the tail.
+                if PROMPT_RE.search(bytes(raw_buf[-200:])):
+                    event = ("closed",)
+                    break
+
                 time.sleep(0.02)
 
-            if dialogue_closed:
-                _log(f"_walk({command}): dialogue closed after {iters - 1} prompts")
-                break
-            if not arrived:
-                _tail = bytes(raw_buf[-200:])
+            if event is None:
                 _log(
-                    f"_walk({command}): timed out (iter {iters}/{len(fields)}) "
-                    f"prev_prompt_start={prev_prompt_start} "
-                    f"last_line_start={_last_line_start(bytes(raw_buf))} "
-                    f"tail={_tail!r}"
+                    f"_walk({command}): timed out waiting for next prompt "
+                    f"after {fields_processed} fields; tail={bytes(raw_buf[-200:])!r}"
                 )
-                # Abort the dialogue so we don't leave the board mid-edit.
+                # Try to escape the dialogue cleanly.
                 try:
                     transport.write(b".\r")
                 except Exception:
                     pass
                 break
 
-            # Identify the label at this prompt. The prompt sits on a
-            # single line; the label is everything from the line start
-            # up to the `=` (with trailing whitespace trimmed).
-            #
-            # PPCBug emits prompts very fast, so by the time we get
-            # here raw_buf may already contain the NEXT prompt (or
-            # several) past cur_prompt_start. Cut the slice at the
-            # first line-break to isolate just this prompt's line.
-            prompt_slice = bytes(raw_buf[cur_prompt_start:])
-            nl_pos = -1
-            for sep in (b"\r", b"\n"):
-                p = prompt_slice.find(sep)
-                if p >= 0 and (nl_pos < 0 or p < nl_pos):
-                    nl_pos = p
-            if nl_pos >= 0:
-                prompt_slice = prompt_slice[:nl_pos]
-            eq_pos = prompt_slice.find(b"=")
-            actual_label = (
-                prompt_slice[:eq_pos].decode(errors="replace").rstrip()
-                if eq_pos >= 0
-                else prompt_slice.decode(errors="replace")
-            )
-            # Also re-extract current_value from this line specifically
-            # (the regex on the buffer tail may have matched a later
-            # prompt's value, not this one's).
-            if eq_pos >= 0:
-                q_pos = prompt_slice.find(b"?", eq_pos)
-                if q_pos >= 0:
-                    current_value = prompt_slice[eq_pos + 1 : q_pos]
+            if event[0] == "closed":
+                _log(f"_walk({command}): dialogue closed (PPC1-Bug>) after {fields_processed} fields")
+                break
+
+            # event = ("prompt", line, advance_to)
+            line = event[1]
+            advance_to = event[2]
+            scan_pos = advance_to
+
+            # Classify the prompt.
+            if save_prompt_substr in line:
+                _log(f"_walk({command}): answering Y to Update NVRAM prompt")
+                try:
+                    transport.write(b"Y\r")
+                except Exception:
+                    pass
+                continue
+            if reset_prompt_substr in line:
+                _log(f"_walk({command}): answering N to Reset prompt")
+                try:
+                    transport.write(b"N\r")
+                except Exception:
+                    pass
+                continue
+
+            # Field prompt. Parse "LABEL =VALUE?".
+            m = field_prompt_re.match(line)
+            if m is None:
+                _log(
+                    f"_walk({command}): could not parse field prompt "
+                    f"{line!r}; sending Enter to skip"
+                )
+                try:
+                    transport.write(b"\r")
+                except Exception:
+                    pass
+                fields_processed += 1
+                continue
+
+            actual_label = m.group(1).decode(errors="replace").strip()
+            current_value = m.group(2)
 
             key = label_to_key.get(actual_label)
             if key is None:
-                # Try a loose match: a known label is a prefix of the
-                # printed label (PPCBug pads with spaces before `=`).
                 for l in labels_sorted:
                     if actual_label.startswith(l):
                         key = label_to_key[l]
                         break
+
             if key is None:
                 _log(
-                    f"_walk({command}) iter {iters}: unknown label "
-                    f"{actual_label!r}; treating as keep-current"
+                    f"_walk({command}) field {fields_processed + 1}: "
+                    f"unknown label {actual_label!r}; keep-current"
                 )
             else:
                 params[key] = current_value.decode(errors="replace").strip()
 
             raw_value = values.get(key, "") if key else ""
-            if raw_value == "" or raw_value is None:
+            if not raw_value:
                 transport.write(b"\r")
-                _log(f"_walk({command}) iter {iters}: {actual_label!r} (key={key}) keep")
-            elif raw_value == ".":
-                # `.` inside the NIOT/ENV dialogue means abort, not clear.
-                # We don't expose dot-clear semantics for PPCBug.
                 _log(
-                    f"_walk({command}) iter {iters}: {actual_label!r} (key={key}) "
-                    f"'.' requested but treating as keep (PPCBug `.` aborts dialogue)"
+                    f"_walk({command}) field {fields_processed + 1}: "
+                    f"{actual_label!r} (key={key}) keep"
                 )
+            elif raw_value == ".":
+                # `.` inside dialogue aborts. Don't expose that semantic
+                # to user-supplied values; treat as keep instead.
                 transport.write(b"\r")
+                _log(
+                    f"_walk({command}) field {fields_processed + 1}: "
+                    f"{actual_label!r} value '.' treated as keep "
+                    f"(`.` aborts the dialogue in PPCBug)"
+                )
             else:
                 _log(
-                    f"_walk({command}) iter {iters}: {actual_label!r} (key={key}) "
-                    f"-> sending {raw_value!r}"
+                    f"_walk({command}) field {fields_processed + 1}: "
+                    f"{actual_label!r} (key={key}) -> sending {raw_value!r}"
                 )
-                # Slow-type to be gentle on the firmware's input buffer
-                # (matches the VxWorks driver's approach; not strictly
-                # known to be needed for PPCBug, but cheap insurance).
                 for ch in raw_value.encode():
                     transport.write(bytes([ch]))
                     time.sleep(0.010)
                 transport.write(b"\r")
                 if key:
                     fields_written.append(key)
-            prev_prompt_start = cur_prompt_start
 
-            # If we're past the last targeted field, abort the rest of
-            # the dialogue with `.` rather than walking every remaining
-            # prompt. PPCBug saves the changes made so far on abort.
+            fields_processed += 1
+
+            # Abort after the last user-editable field, if configured.
             if last_target_idx >= 0 and key is not None:
                 cur_idx = index_of_key.get(key, -1)
                 if cur_idx >= last_target_idx:
                     _log(
                         f"_walk({command}): past last target field "
-                        f"(idx {cur_idx} >= {last_target_idx}); aborting with `.`"
+                        f"(idx {cur_idx} >= {last_target_idx}); will abort "
+                        f"with `.` on next prompt"
                     )
-                    # Wait for the NEXT prompt to arrive, then send `.`.
-                    # Sending it at the current prompt-just-responded
-                    # moment would race against the board printing the
-                    # next prompt; cleaner to wait for that prompt.
+                    # Wait for the NEXT prompt to arrive, send `.`.
                     abort_deadline = time.time() + timeout
                     while time.time() < abort_deadline:
-                        while q:
-                            raw_buf.extend(q.popleft())
-                        tail = bytes(raw_buf[-512:])
-                        if PROMPT_RE.search(tail):
-                            # Dialogue closed on its own (last field
-                            # really was the last in the schema).
+                        drain()
+                        next_q = raw_buf.find(b"?", scan_pos)
+                        if next_q >= 0:
+                            try:
+                                transport.write(b".\r")
+                            except Exception:
+                                pass
                             break
-                        m = pending_prompt_re.search(tail)
-                        if m is not None:
-                            line_start = _last_line_start(bytes(raw_buf))
-                            if line_start > prev_prompt_start:
-                                try:
-                                    transport.write(b".\r")
-                                except Exception:
-                                    pass
-                                break
+                        if PROMPT_RE.search(bytes(raw_buf[-200:])):
+                            break
                         time.sleep(0.02)
                     break
 
-        # Drain to the closing PPC1-Bug> prompt.
+        # If we aborted, drain through to PPC1-Bug>. Otherwise we already
+        # exited on closed/timeout, but the prompt may still be in flight.
         if not PROMPT_RE.search(bytes(raw_buf[-200:])):
-            deadline = time.time() + 3.0
-            while time.time() < deadline:
-                while q:
-                    raw_buf.extend(q.popleft())
+            close_deadline = time.time() + 5.0
+            while time.time() < close_deadline:
+                drain()
                 if PROMPT_RE.search(bytes(raw_buf[-200:])):
                     break
                 time.sleep(0.02)

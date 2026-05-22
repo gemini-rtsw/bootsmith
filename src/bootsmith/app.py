@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import asdict
 
@@ -39,6 +40,11 @@ def _render_profile_list():
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["sessions"] = SessionManager()
+    # Serialize push/read-params operations so two concurrent clicks
+    # never run two _walk() calls against the same transport at once
+    # (they would fight for queue subscribers and produce interleaved
+    # nonsense).
+    app.config["push_lock"] = threading.Lock()
     sock = Sock(app)
 
     @app.get("/")
@@ -396,11 +402,16 @@ def create_app() -> Flask:
         if driver is None:
             return _error(f"no driver for loader {ws.loader!r}"), 400
         values = dict(sess.profile.boot_params)
+        lock: threading.Lock = app.config["push_lock"]
+        if not lock.acquire(blocking=False):
+            return _error("another push is already in progress"), 409
         try:
             driver.write_params(sess.transport, values)
             verify = driver.read_params(sess.transport)
         except ConnectionError as e:
             return _error(f"WTI session is dead during push: {e}. Reconnect and retry."), 502
+        finally:
+            lock.release()
         fields = schemas_mod.fields_for(ws.loader)
         diff = []
         for _label, key in fields:
