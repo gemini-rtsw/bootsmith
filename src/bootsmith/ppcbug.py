@@ -420,7 +420,14 @@ def _walk(
 
                 # No prompt yet. Check if the board has returned to
                 # PPC1-Bug> (dialogue ended). Look at the tail.
-                if PROMPT_RE.search(bytes(raw_buf[-200:])):
+                # BUT: only treat PPC1-Bug> as "closed" if we have
+                # already processed at least one field. A PPC1-Bug>
+                # in the buffer before the first field-prompt is a
+                # leftover from before this _walk began (e.g. the
+                # echo of a bare \r after the previous dialogue
+                # closed). If we exit on it, we never even see the
+                # first ENV prompt.
+                if fields_processed > 0 and PROMPT_RE.search(bytes(raw_buf[-200:])):
                     event = ("closed",)
                     break
 
