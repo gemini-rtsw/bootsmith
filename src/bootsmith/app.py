@@ -472,6 +472,12 @@ def create_app() -> Flask:
                         if got:
                             diff.append({"key": key, "want": "(cleared)", "got": got})
                         continue
+                    # Single-character values (Y/N/A/W/B/S/G/M etc.)
+                    # are case-insensitive on PPCBug -- the board
+                    # accepts lowercase but always echoes uppercase
+                    # on readback. Don't flag those as mismatches.
+                    if len(want) == 1 and want.casefold() == got.casefold():
+                        continue
                     if want != got:
                         diff.append({"key": key, "want": want, "got": got})
                 with app.app_context():
