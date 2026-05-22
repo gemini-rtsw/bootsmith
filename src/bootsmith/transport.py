@@ -527,6 +527,17 @@ class TelnetTransport:
                     file=_sys.stderr, flush=True,
                 )
                 return
+            except AttributeError:
+                # telnetlib internals can hit `self.sock.recv` after the
+                # socket was nulled out by a concurrent close. Treat as
+                # a clean disconnect rather than letting the thread die.
+                self._status.connected = False
+                self._status.error = "socket closed during read"
+                print(
+                    f"[telnet {self.host}:{self.port}] socket closed mid-read",
+                    file=_sys.stderr, flush=True,
+                )
+                return
             if not chunk:
                 # No data right now; sleep a tick before checking again.
                 time.sleep(0.02)
