@@ -589,24 +589,33 @@ def _walk(
                 )
             elif raw_value == ".":
                 # `.` typed at a PPCBug NIOT/ENV prompt aborts the
-                # dialogue, which is never what the user means here.
-                # The user is borrowing the VxWorks "clear field"
-                # convention. PPCBug's actual "no value" semantic for
-                # file-name fields is the literal string NULL; for
-                # other fields, blank/0 is the empty state. We send
-                # NULL -- the firmware accepts it for the file-name
-                # slots and harmlessly stores it as a value elsewhere
-                # (caller should not put `.` in non-file-name fields).
-                _log(
-                    f"_walk({command}) field {fields_processed + 1}: "
-                    f"{actual_label!r} value '.' -> sending 'NULL'"
-                )
-                for ch in b"NULL":
-                    transport.write(bytes([ch]))
-                    time.sleep(0.010)
-                transport.write(b"\r")
-                if key:
-                    fields_written.append(key)
+                # dialogue. The user is borrowing VxWorks's "clear
+                # field" convention. PPCBug accepts the literal string
+                # NULL as "no value" ONLY for the boot/argument file-
+                # name fields. For everything else (hex addresses,
+                # IPs, numeric retry counts) NULL is rejected as an
+                # illegal argument. So:
+                #   * On a known file-name field -> send NULL.
+                #   * Anywhere else -> treat `.` as keep (send Enter).
+                FILE_NAME_KEYS = {"boot_file_name", "argument_file_name"}
+                if key in FILE_NAME_KEYS:
+                    _log(
+                        f"_walk({command}) field {fields_processed + 1}: "
+                        f"{actual_label!r} value '.' -> sending 'NULL'"
+                    )
+                    for ch in b"NULL":
+                        transport.write(bytes([ch]))
+                        time.sleep(0.010)
+                    transport.write(b"\r")
+                    if key:
+                        fields_written.append(key)
+                else:
+                    _log(
+                        f"_walk({command}) field {fields_processed + 1}: "
+                        f"{actual_label!r} value '.' on non-file-name "
+                        f"field -> keep (PPCBug rejects NULL here)"
+                    )
+                    transport.write(b"\r")
             else:
                 # PPCBug Y/N fields only accept lowercase y/n -- typing
                 # uppercase Y leaves the field unchanged. Force lowercase

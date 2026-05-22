@@ -492,8 +492,20 @@ def create_app() -> Flask:
                         continue
                     if want == ".":
                         # VxWorks: `.` clears -> readback should be empty.
-                        # PPCBug: driver translates `.` -> NULL, so an
-                        # empty readback OR a literal NULL is success.
+                        # PPCBug: driver translates `.` -> NULL only on
+                        # file-name fields (boot_file_name,
+                        # argument_file_name); elsewhere it keeps the
+                        # current value because NULL is rejected as an
+                        # illegal argument on hex/numeric fields. So a
+                        # `.` mismatch is only meaningful when an empty
+                        # / NULL readback was actually expected. For
+                        # non-file-name keys on PPCBug, suppress the
+                        # diff entry entirely.
+                        if loader == "ppcbug" and key not in (
+                            "boot_file_name",
+                            "argument_file_name",
+                        ):
+                            continue
                         if got and got.upper() != "NULL":
                             diff.append({"key": key, "want": "(cleared)", "got": got})
                         continue
