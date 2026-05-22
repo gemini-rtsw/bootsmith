@@ -319,6 +319,13 @@ def _walk(
     # of the buffer. We can't gate the loop on a SPECIFIC label because
     # we want to detect dialogue closure (returning to PPC1-Bug>) too.
     pending_prompt_re = re.compile(rb"=([^?\r\n]*)\?\s*\Z")
+    # PPCBug emits "Update Non-Volatile RAM (Y/N)?" at the end of NIOT
+    # (and sometimes ENV) when values were changed. We always answer Y
+    # to commit. We could also see "Reset Local System (Y/N)?" after
+    # ENV — we always say N (we don't want a reset; the user will boot
+    # explicitly afterward).
+    save_prompt_re = re.compile(rb"Update Non-Volatile RAM\s*\(Y/N\)\?\s*\Z")
+    reset_prompt_re = re.compile(rb"Reset Local System\s*\(Y/N\)\?\s*\Z")
     # For label extraction we grab the largest known label that ends
     # right before the `=` token.
     label_to_key = {label: key for label, key in fields}
@@ -351,6 +358,31 @@ def _walk(
                 if PROMPT_RE.search(tail):
                     dialogue_closed = True
                     break
+                # Handle PPCBug's "Update NVRAM?" / "Reset?" prompts
+                # that can appear before or instead of the next field.
+                if save_prompt_re.search(tail):
+                    _log(f"_walk({command}): answering Y to Update NVRAM prompt")
+                    try:
+                        transport.write(b"Y\r")
+                    except Exception:
+                        pass
+                    # Don't break the loop; keep waiting for either the
+                    # next field prompt or PPC1-Bug>. Advance prev_prompt
+                    # _start past this line so we don't re-match it.
+                    prev_prompt_start = _last_line_start(bytes(raw_buf))
+                    # Small grace period to let the response be echoed
+                    # before the next prompt arrives.
+                    time.sleep(0.1)
+                    continue
+                if reset_prompt_re.search(tail):
+                    _log(f"_walk({command}): answering N to Reset prompt")
+                    try:
+                        transport.write(b"N\r")
+                    except Exception:
+                        pass
+                    prev_prompt_start = _last_line_start(bytes(raw_buf))
+                    time.sleep(0.1)
+                    continue
                 m = pending_prompt_re.search(tail)
                 if m is not None:
                     line_start = _last_line_start(bytes(raw_buf))
@@ -382,15 +414,32 @@ def _walk(
             # Identify the label at this prompt. The prompt sits on a
             # single line; the label is everything from the line start
             # up to the `=` (with trailing whitespace trimmed).
-            prompt_line = bytes(raw_buf[cur_prompt_start:])
-            # Strip CR/LF/etc.
-            prompt_line = prompt_line.rstrip(b"\r\n")
-            eq_pos = prompt_line.rfind(b"=")
+            #
+            # PPCBug emits prompts very fast, so by the time we get
+            # here raw_buf may already contain the NEXT prompt (or
+            # several) past cur_prompt_start. Cut the slice at the
+            # first line-break to isolate just this prompt's line.
+            prompt_slice = bytes(raw_buf[cur_prompt_start:])
+            nl_pos = -1
+            for sep in (b"\r", b"\n"):
+                p = prompt_slice.find(sep)
+                if p >= 0 and (nl_pos < 0 or p < nl_pos):
+                    nl_pos = p
+            if nl_pos >= 0:
+                prompt_slice = prompt_slice[:nl_pos]
+            eq_pos = prompt_slice.find(b"=")
             actual_label = (
-                prompt_line[:eq_pos].decode(errors="replace").rstrip()
+                prompt_slice[:eq_pos].decode(errors="replace").rstrip()
                 if eq_pos >= 0
-                else prompt_line.decode(errors="replace")
+                else prompt_slice.decode(errors="replace")
             )
+            # Also re-extract current_value from this line specifically
+            # (the regex on the buffer tail may have matched a later
+            # prompt's value, not this one's).
+            if eq_pos >= 0:
+                q_pos = prompt_slice.find(b"?", eq_pos)
+                if q_pos >= 0:
+                    current_value = prompt_slice[eq_pos + 1 : q_pos]
 
             key = label_to_key.get(actual_label)
             if key is None:
