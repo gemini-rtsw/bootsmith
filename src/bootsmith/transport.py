@@ -344,8 +344,14 @@ class WTITransport:
                 while self._ring_len > self._ring_max and self._ring:
                     old = self._ring.popleft()
                     self._ring_len -= len(old)
+                fanout_n = len(self._subscribers)
                 for q in self._subscribers:
                     q.append(chunk)
+            if self._status.bytes_in % 5000 < len(chunk):
+                print(
+                    f"[telnet {self.host}:{self.port}] fanout n={fanout_n} bytes_in={self._status.bytes_in}",
+                    file=_sys.stderr, flush=True,
+                )
 
 
 # Default transport used by the rest of the app. Aliased so existing
@@ -479,14 +485,25 @@ class TelnetTransport:
             if seed_history:
                 for chunk in self._ring:
                     q.append(chunk)
+            n = len(self._subscribers)
+        print(
+            f"[telnet {self.host}:{self.port}] subscribe id={id(q)} n={n} seed={seed_history}",
+            file=_sys.stderr, flush=True,
+        )
         return q
 
     def unsubscribe(self, q: deque[bytes]) -> None:
         with self._lock:
             try:
                 self._subscribers.remove(q)
+                removed = True
             except ValueError:
-                pass
+                removed = False
+            n = len(self._subscribers)
+        print(
+            f"[telnet {self.host}:{self.port}] unsubscribe id={id(q)} removed={removed} n={n}",
+            file=_sys.stderr, flush=True,
+        )
 
     def snapshot(self) -> bytes:
         with self._lock:
@@ -532,5 +549,11 @@ class TelnetTransport:
                 while self._ring_len > self._ring_max and self._ring:
                     old = self._ring.popleft()
                     self._ring_len -= len(old)
+                fanout_n = len(self._subscribers)
                 for q in self._subscribers:
                     q.append(chunk)
+            if self._status.bytes_in % 5000 < len(chunk):
+                print(
+                    f"[telnet {self.host}:{self.port}] fanout n={fanout_n} bytes_in={self._status.bytes_in}",
+                    file=_sys.stderr, flush=True,
+                )
