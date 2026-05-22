@@ -125,8 +125,34 @@
         ws.send(buf);
       }
 
-      function bytesAppendRaw(pre, data) {
-        // data is a Uint8Array of raw bytes.
+      // Pending text waiting to be flushed to #serial. Batching via
+      // requestAnimationFrame keeps the main thread responsive when
+      // the board emits a long burst of bytes (e.g. during a push):
+      // hundreds of WS messages get coalesced into one DOM append
+      // per frame instead of hundreds of forced layouts.
+      let __pendingSerialText = "";
+      let __serialRafScheduled = false;
+
+      function flushSerial() {
+        __serialRafScheduled = false;
+        const pre = document.getElementById("serial");
+        if (!pre) {
+          __pendingSerialText = "";
+          return;
+        }
+        if (!__pendingSerialText) return;
+        pre.appendChild(document.createTextNode(__pendingSerialText));
+        __pendingSerialText = "";
+        if (pre.textContent.length > 200000) {
+          pre.textContent = pre.textContent.slice(-150000);
+        }
+        pre.scrollTop = pre.scrollHeight;
+      }
+
+      function bytesAppendRaw(_pre, data) {
+        // data is a Uint8Array of raw bytes. _pre is ignored — we look
+        // it up fresh in flushSerial(); the parameter is kept for API
+        // compatibility with the call site.
         let s = "";
         for (let i = 0; i < data.length; i++) {
           const c = data[i];
@@ -137,11 +163,11 @@
             s += "\\x" + c.toString(16).padStart(2, "0");
           }
         }
-        pre.appendChild(document.createTextNode(s));
-        if (pre.textContent.length > 200000) {
-          pre.textContent = pre.textContent.slice(-150000);
+        __pendingSerialText += s;
+        if (!__serialRafScheduled) {
+          __serialRafScheduled = true;
+          requestAnimationFrame(flushSerial);
         }
-        pre.scrollTop = pre.scrollHeight;
       }
 
       // Bind terminal keydown ONCE at the document level via event

@@ -302,12 +302,18 @@ def create_app() -> Flask:
                     exit_reason = "ws.connected is False"
                     return
 
-                # Drain board→browser.
-                while q:
-                    chunk = q.popleft()
+                # Drain board→browser. Coalesce everything currently in
+                # the queue into a single ws.send to avoid pummeling the
+                # browser with hundreds of tiny WS frames during a push
+                # (each frame triggers onmessage + DOM append + reflow,
+                # which can starve click/keydown event delivery).
+                if q:
+                    merged = bytearray()
+                    while q:
+                        merged.extend(q.popleft())
                     try:
-                        ws.send(chunk)
-                        bytes_sent += len(chunk)
+                        ws.send(bytes(merged))
+                        bytes_sent += len(merged)
                     except Exception as e:
                         exit_reason = f"send failed: {e}"
                         return
