@@ -8,7 +8,7 @@
 
   {% if profile.loader_hint == "ppcbug" and diag_commands %}
     <h4>Diag commands</h4>
-    <p class="hint">Selected commands run in order (after <code>SD</code>) when you click Diag, then the board is reset back to PPC1-Bug&gt;.</p>
+    <p class="hint">Selected commands run in order (after <code>SD</code>) when you click Diag, then <code>SD</code> again to return to PPC1-Bug&gt;.</p>
     {% set enabled = (profile.diag_commands or []) %}
     <div class="diag-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 12px;margin:4px 0 8px;">
       {% for label, key, cmd in diag_commands %}

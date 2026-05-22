@@ -343,11 +343,13 @@ def diag(transport: WTITransport, enabled_keys: set[str], timeout: float = 300.0
                 )
             raw_buf.clear()
 
-        _log("diag: sending RESET to return to PPC1-Bug>")
+        # `SD` toggles between PPC1-Diag> and PPC1-Bug>. Cleaner than
+        # RESET (which itself walks two interactive Y/N prompts).
+        _log("diag: sending SD to return to PPC1-Bug>")
         try:
-            transport.write(b"RESET\r")
+            transport.write(b"SD\r")
         except Exception as e:
-            _log(f"diag: RESET write failed: {e}")
+            _log(f"diag: SD write failed: {e}")
     finally:
         transport.unsubscribe(q)
 
