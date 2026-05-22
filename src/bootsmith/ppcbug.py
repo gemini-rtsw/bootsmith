@@ -183,7 +183,26 @@ FIELDS: tuple[tuple[str, str], ...] = NIOT_FIELDS + tuple(
 )
 
 
+# Diag-mode commands (entered after `SD` drops us into PPC1-Diag>). Curated
+# subset of what `he` lists, focused on basic CPU-board sanity. Each entry
+# is (label, key, command-to-send). The Diag button walks this list in order
+# and only sends commands whose key is enabled in profile.diag_commands.
+DIAG_COMMANDS: tuple[tuple[str, str, str], ...] = (
+    ("Quick Self Test (QST)",            "diag_qst",     "QST"),
+    ("Full Self Test (ST)",              "diag_st",      "ST"),
+    ("RAM tests",                        "diag_ram",     "RAM"),
+    ("L2 Cache tests",                   "diag_l2cache", "L2CACHE"),
+    ("Ethernet controller (DEC21x4x)",   "diag_dec",     "DEC"),
+    ("NCR 53C8XX SCSI",                  "diag_ncr",     "NCR"),
+    ("EIDE tests",                       "diag_eide",    "EIDE"),
+    ("Real-time clock (RTC)",            "diag_rtc",     "RTC"),
+    ("Serial I/O (UART)",                "diag_uart",    "UART"),
+    ("Display errors after run (DE)",    "diag_de",      "DE"),
+)
+
+
 PROMPT_RE = re.compile(rb"PPC[0-9](?:-Bug)?>\s*\Z")
+DIAG_PROMPT_RE = re.compile(rb"PPC[0-9]-Diag>\s*\Z")
 
 
 def _log(msg: str) -> None:
@@ -274,6 +293,61 @@ def boot(transport: WTITransport) -> None:
     surface the output to the user.
     """
     transport.write(b"NBO\r")
+
+
+def diag(transport: WTITransport, enabled_keys: set[str], timeout: float = 60.0) -> None:
+    """Run a sequence of PPC1-Diag commands then RESET back to PPC1-Bug>.
+
+    Sends `SD` to switch into diag mode, then for each entry in
+    DIAG_COMMANDS whose key is in `enabled_keys`, sends the command
+    and waits for the next `PPC1-Diag>` prompt before moving on.
+    Finally sends `RESET` to cold-reset the board back to PPC1-Bug>.
+
+    The transport will likely drop briefly during RESET — the watcher
+    and session manager handle the reopen; the caller doesn't have to
+    do anything special.
+
+    timeout is per-command. Some diag commands (RAM, full ST) can run
+    for tens of seconds; the 60s default is generous but not infinite.
+    """
+    q = transport.subscribe(seed_history=False)
+    raw_buf = bytearray()
+
+    def wait_for(pattern: re.Pattern[bytes], deadline: float) -> bool:
+        while time.time() < deadline:
+            while q:
+                raw_buf.extend(q.popleft())
+            if pattern.search(bytes(raw_buf[-200:])):
+                return True
+            time.sleep(0.05)
+        return False
+
+    try:
+        _log(f"diag: sending SD; enabled keys: {sorted(enabled_keys)}")
+        transport.write(b"SD\r")
+        if not wait_for(DIAG_PROMPT_RE, time.time() + 5.0):
+            _log("diag: timed out waiting for PPC1-Diag> after SD")
+            return
+        # Reset raw_buf so per-command waits don't see stale prompts.
+        raw_buf.clear()
+
+        for label, key, cmd in DIAG_COMMANDS:
+            if key not in enabled_keys:
+                continue
+            _log(f"diag: {label} (sending {cmd!r})")
+            transport.write(cmd.encode() + b"\r")
+            if not wait_for(DIAG_PROMPT_RE, time.time() + timeout):
+                _log(f"diag: timed out waiting for prompt after {cmd!r}; aborting")
+                break
+            raw_buf.clear()
+
+        _log("diag: sending RESET to return to PPC1-Bug>")
+        try:
+            transport.write(b"RESET\r")
+        except Exception as e:
+            _log(f"diag: RESET write failed: {e}")
+    finally:
+        transport.unsubscribe(q)
 
 
 @dataclass

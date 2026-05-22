@@ -2,13 +2,20 @@
    params section is currently rendered. All swaps target the stable
    #params wrapper with innerHTML so htmx never has to replace the
    element that owns the click listeners with one of identical id. #}
+{% set loader = profile.loader_hint if profile else "" %}
+{% set boot_label = "Boot (NBO)" if loader == "ppcbug" else "Boot (@)" %}
 <div class="controls">
   <form hx-post="/params/push" hx-target="#params" hx-swap="innerHTML" class="inline">
     <button type="submit" class="primary">Push to board</button>
   </form>
   <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML" class="inline">
-    <button type="submit" class="primary">Boot (@)</button>
+    <button type="submit" class="primary">{{ boot_label }}</button>
   </form>
+  {% if loader == "ppcbug" %}
+    <form hx-post="/params/diag" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit">Diag</button>
+    </form>
+  {% endif %}
   <form hx-get="/params/edit" hx-target="#params" hx-swap="innerHTML" class="inline">
     <button type="submit">Edit</button>
   </form>

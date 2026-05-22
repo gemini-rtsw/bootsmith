@@ -5,6 +5,22 @@
       hx-swap="innerHTML"
       hx-headers='{"X-Return": "params"}'>
   {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
+
+  {% if profile.loader_hint == "ppcbug" and diag_commands %}
+    <h4>Diag commands</h4>
+    <p class="hint">Selected commands run in order (after <code>SD</code>) when you click Diag, then the board is reset back to PPC1-Bug&gt;.</p>
+    {% set enabled = (profile.diag_commands or []) %}
+    <div class="diag-checkboxes">
+      {% for label, key, cmd in diag_commands %}
+        <label class="diag-check">
+          <input type="checkbox" name="diag_{{ key }}" value="1"
+                 {% if key in enabled %}checked{% endif %}>
+          {{ label }} <code>({{ cmd }})</code>
+        </label>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   <div class="controls">
     <button type="submit" class="primary">Save</button>
   </div>

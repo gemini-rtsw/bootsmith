@@ -1,0 +1,9 @@
+<h3>Running diagnostics on {{ profile.name }}…</h3>
+<p class="hint">
+  Sending <code>SD</code> then running:
+  <ul>
+    {% for key in enabled %}<li><code>{{ key }}</code></li>{% endfor %}
+  </ul>
+  Followed by <code>RESET</code>. Watch the live terminal above for output.
+</p>
+{% include "_params_actions.html" %}

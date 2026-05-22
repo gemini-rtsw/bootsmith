@@ -132,6 +132,22 @@ def create_app() -> Flask:
         if has_param_fields or loader_changed:
             existing.boot_params = new_params
 
+        # Diag commands: collect any diag_* checkboxes for PPCBug. The
+        # form posts diag_<key>=1 for each checked box; absent boxes
+        # mean unchecked. Only update if the form actually rendered the
+        # diag section (any diag_ key present) OR loader changed.
+        has_diag_fields = any(k.startswith("diag_") for k in request.form.keys())
+        if has_diag_fields or loader_changed:
+            if loader_hint == "ppcbug":
+                valid = {key for _label, key, _cmd in ppcbug_mod.DIAG_COMMANDS}
+                checked = [
+                    k[len("diag_"):] for k in request.form.keys()
+                    if k.startswith("diag_") and k[len("diag_"):] in valid
+                ]
+                existing.diag_commands = sorted(checked)
+            else:
+                existing.diag_commands = []
+
         # Handle rename if a new_name was submitted and it differs.
         new_name = (request.form.get("new_name") or "").strip()
         if new_name and new_name != name:
@@ -410,10 +426,14 @@ def create_app() -> Flask:
         profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
         sess.profile = profile
         fields = schemas_mod.fields_for(profile.loader_hint)
+        diag_commands = (
+            ppcbug_mod.DIAG_COMMANDS if profile.loader_hint == "ppcbug" else ()
+        )
         return render_template(
             "_params_edit.html",
             profile=profile,
             fields=fields,
+            diag_commands=diag_commands,
         )
 
     @app.post("/params/push")
@@ -523,8 +543,10 @@ def create_app() -> Flask:
         if state == "done":
             return html
         if state == "error":
+            sess = app.config["sessions"].current()
             return f'<div class="error">push failed: {err}</div>' + render_template(
-                "_params_actions.html"
+                "_params_actions.html",
+                profile=(sess.profile if sess else None),
             )
         # running or idle: keep showing the running panel; client polls.
         sessions: SessionManager = app.config["sessions"]
@@ -533,6 +555,42 @@ def create_app() -> Flask:
             "_params_running.html",
             profile=(sess.profile if sess else None),
         )
+
+    @app.post("/params/diag")
+    def params_diag():
+        """Run the saved profile's enabled diag commands.
+
+        Sends SD -> each enabled diag command -> RESET. Returns a small
+        status panel; output is visible in the live terminal.
+        """
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        loader = sess.watcher.status().loader or sess.profile.loader_hint
+        if loader != "ppcbug":
+            return _error(f"diag only supported on PPCBug (loader={loader!r})"), 400
+        enabled = set(sess.profile.diag_commands or [])
+        if not enabled:
+            return _error("no diag commands selected in profile (edit profile to enable some)"), 400
+
+        lock: threading.Lock = app.config["push_lock"]
+        if not lock.acquire(blocking=False):
+            return _error("another push is already in progress"), 409
+        transport = sess.transport
+        profile = sess.profile
+
+        def _runner():
+            try:
+                ppcbug_mod.diag(transport, enabled)
+            except Exception as e:
+                print(f"[diag] error: {e}", file=__import__("sys").stderr, flush=True)
+            finally:
+                lock.release()
+
+        t = threading.Thread(target=_runner, daemon=True, name="diag")
+        t.start()
+        return render_template("_params_diag.html", profile=profile, enabled=sorted(enabled))
 
     @app.post("/params/boot")
     def params_boot():
