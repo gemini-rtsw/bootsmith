@@ -1,4 +1,4 @@
-{% from "_profile_form_fields.html" import boot_param_fields %}
+{% from "_profile_form_fields.html" import boot_param_fields, diag_command_fields %}
 <section class="profiles">
   <h2>Targets</h2>
   {% if profiles %}
@@ -59,6 +59,7 @@
             <div id="edit-params-{{ p.name }}" data-edit-params-container>
               <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
               {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+              {{ diag_command_fields(p.loader_hint, diag_commands_schema, p.diag_commands or []) }}
             </div>
             <div class="row">
               <button type="submit" class="primary">Save</button>
@@ -106,6 +107,7 @@
       <h4>Boot params (RTEMS / PPC)</h4>
       <p class="hint">PPCBug NIOT fields. Leave blank what doesn't apply.</p>
       {{ boot_param_fields("ppcbug", schemas.get("ppcbug", ()), {}) }}
+      {{ diag_command_fields("ppcbug", diag_commands_schema, []) }}
     </template>
   </details>
 </section>

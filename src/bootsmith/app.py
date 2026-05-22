@@ -34,6 +34,7 @@ def _render_profile_list():
         profiles=profiles_mod.list_profiles(),
         schemas=schemas_mod.SCHEMAS,
         loader_labels=schemas_mod.LOADER_LABELS,
+        diag_commands_schema=ppcbug_mod.DIAG_COMMANDS,
     )
 
 
@@ -66,6 +67,7 @@ def create_app() -> Flask:
             profiles=profiles_mod.list_profiles(),
             schemas=schemas_mod.SCHEMAS,
             loader_labels=schemas_mod.LOADER_LABELS,
+            diag_commands_schema=ppcbug_mod.DIAG_COMMANDS,
         )
 
     @app.get("/profiles")

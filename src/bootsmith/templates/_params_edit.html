@@ -1,26 +1,11 @@
-{% from "_profile_form_fields.html" import boot_param_fields %}
+{% from "_profile_form_fields.html" import boot_param_fields, diag_command_fields %}
 <h3>Edit boot params for {{ profile.name }}</h3>
 <form hx-post="/profiles/{{ profile.name }}/update"
       hx-target="#params"
       hx-swap="innerHTML"
       hx-headers='{"X-Return": "params"}'>
   {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
-
-  {% if profile.loader_hint == "ppcbug" and diag_commands %}
-    <h4>Diag commands</h4>
-    <p class="hint">Selected commands run in order (after <code>SD</code>) when you click Diag, then <code>SD</code> again to return to PPC1-Bug&gt;.</p>
-    {% set enabled = (profile.diag_commands or []) %}
-    <div class="diag-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 12px;margin:4px 0 8px;">
-      {% for label, key, cmd in diag_commands %}
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;line-height:1.3;margin:0;padding:1px 0;">
-          <input type="checkbox" name="diag_{{ key }}" value="1"
-                 {% if key in enabled %}checked{% endif %}
-                 style="margin:0;">
-          <span><code>{{ cmd }}</code> &mdash; {{ label.split(' (')[0] }}</span>
-        </label>
-      {% endfor %}
-    </div>
-  {% endif %}
+  {{ diag_command_fields(profile.loader_hint, diag_commands, profile.diag_commands or []) }}
 
   <div class="controls">
     <button type="submit" class="primary">Save</button>
