@@ -295,7 +295,7 @@ def boot(transport: WTITransport) -> None:
     transport.write(b"NBO\r")
 
 
-def diag(transport: WTITransport, enabled_keys: set[str], timeout: float = 60.0) -> None:
+def diag(transport: WTITransport, enabled_keys: set[str], timeout: float = 300.0) -> None:
     """Run a sequence of PPC1-Diag commands then RESET back to PPC1-Bug>.
 
     Sends `SD` to switch into diag mode, then for each entry in
@@ -337,8 +337,10 @@ def diag(transport: WTITransport, enabled_keys: set[str], timeout: float = 60.0)
             _log(f"diag: {label} (sending {cmd!r})")
             transport.write(cmd.encode() + b"\r")
             if not wait_for(DIAG_PROMPT_RE, time.time() + timeout):
-                _log(f"diag: timed out waiting for prompt after {cmd!r}; aborting")
-                break
+                _log(
+                    f"diag: {cmd!r} did not return to PPC1-Diag> within "
+                    f"{timeout:.0f}s -- continuing to next command anyway"
+                )
             raw_buf.clear()
 
         _log("diag: sending RESET to return to PPC1-Bug>")
