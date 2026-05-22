@@ -11,7 +11,6 @@
   <header>
     <h1>Bootsmith</h1>
     <p class="tagline">VME boot-parameter editor over WTI serial</p>
-    <div id="diag" style="font-family: monospace; font-size: 11px; color: #888; padding: 2px 8px;">diag: -</div>
   </header>
 
   <main id="main">
@@ -23,20 +22,10 @@
   </footer>
 
   <script>
-    // Surface any uncaught JS errors and unhandled promise rejections
-    // visibly in the diag strip so we can debug them without devtools.
-    window.addEventListener("error", (e) => {
-      const diag = document.getElementById("diag");
-      if (diag) diag.textContent = "JS ERR: " + (e.message || "?") + " @ " + (e.filename || "?") + ":" + (e.lineno || "?");
-      console.error("[bootsmith] uncaught", e.error || e);
-    });
-    window.addEventListener("unhandledrejection", (e) => {
-      const diag = document.getElementById("diag");
-      if (diag) diag.textContent = "JS REJ: " + (e.reason && e.reason.message ? e.reason.message : String(e.reason));
-      console.error("[bootsmith] unhandled rejection", e.reason);
-    });
-    // Live-session controller. Loaded once with the page so it survives
-    // htmx swaps that bring the .session fragment in or out of #main.
+    // Dumb terminal + lightweight status poller. The terminal is a
+    // straight WebSocket <-> <pre> pipe; nothing else on the page
+    // touches it. Driver work happens on the server via the existing
+    // buttons (Push / Boot / Edit / Disconnect) and is independent.
     (function () {
       const STATE_LABEL = {
         idle: "idle",
@@ -46,49 +35,145 @@
         missed: "no prompt detected",
       };
 
+      let ws = null;
+      let wsReconnectTimer = null;
+      let wsKeepalive = null;
+      let wsShouldStayOpen = false;
       let pollTimer = null;
       let lastProfile = null;
-
       let paramsLoadedForLoader = null;
 
+      function appendSerial(data) {
+        const pre = document.getElementById("serial");
+        if (!pre) return;
+        let s = "";
+        for (let i = 0; i < data.length; i++) {
+          const c = data[i];
+          if (c === 13) continue;
+          if (c === 9 || c === 10 || (c >= 32 && c < 127)) {
+            s += String.fromCharCode(c);
+          } else {
+            s += "\\x" + c.toString(16).padStart(2, "0");
+          }
+        }
+        pre.appendChild(document.createTextNode(s));
+        if (pre.textContent.length > 200000) {
+          pre.textContent = pre.textContent.slice(-150000);
+        }
+        pre.scrollTop = pre.scrollHeight;
+      }
+
+      function sendBytes(bytes) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (typeof bytes === "string") {
+          const buf = new Uint8Array(bytes.length);
+          for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i) & 0xff;
+          ws.send(buf);
+        } else {
+          ws.send(bytes);
+        }
+      }
+
+      function openWS() {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        try {
+          ws = new WebSocket(proto + "//" + location.host + "/ws/terminal");
+        } catch (e) {
+          scheduleWSReconnect();
+          return;
+        }
+        ws.binaryType = "arraybuffer";
+        ws.onopen = () => {
+          if (wsKeepalive) clearInterval(wsKeepalive);
+          wsKeepalive = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              try { ws.send("ping"); } catch (_) {}
+            }
+          }, 20000);
+        };
+        ws.onmessage = (ev) => {
+          if (typeof ev.data === "string") return;
+          appendSerial(new Uint8Array(ev.data));
+        };
+        ws.onclose = () => {
+          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
+          ws = null;
+          if (wsShouldStayOpen) scheduleWSReconnect();
+        };
+        ws.onerror = () => {};
+      }
+
+      function scheduleWSReconnect() {
+        if (wsReconnectTimer || !wsShouldStayOpen) return;
+        wsReconnectTimer = setTimeout(() => {
+          wsReconnectTimer = null;
+          if (wsShouldStayOpen) openWS();
+        }, 1000);
+      }
+
+      // Keydown handler — bound ONCE at document level. Only acts when
+      // #terminal-input is the active element. Independent of any
+      // htmx swap on #params or anywhere else.
+      document.addEventListener("keydown", (e) => {
+        const input = document.getElementById("terminal-input");
+        if (!input || document.activeElement !== input) return;
+        if (e.key === "Enter") {
+          e.preventDefault(); sendBytes("\r"); input.value = ""; return;
+        }
+        if (e.key === "Backspace") {
+          e.preventDefault(); sendBytes("\x7f"); input.value = input.value.slice(0, -1); return;
+        }
+        if (e.key === "Tab") { e.preventDefault(); sendBytes("\t"); return; }
+        if (e.key === "Escape") { e.preventDefault(); sendBytes("\x1b"); return; }
+        if (e.ctrlKey && e.key.length === 1) {
+          const code = e.key.toUpperCase().charCodeAt(0);
+          if (code >= 0x40 && code <= 0x5f) {
+            e.preventDefault(); sendBytes(String.fromCharCode(code - 0x40)); return;
+          }
+        }
+        if (e.key.length === 1 && !e.metaKey && !e.altKey) {
+          e.preventDefault(); sendBytes(e.key); input.value += e.key; return;
+        }
+      });
+      document.addEventListener("click", (e) => {
+        if (e.target && e.target.id === "serial") {
+          const inp = document.getElementById("terminal-input");
+          if (inp) inp.focus();
+        }
+      });
+
       function applyStatus(j) {
-        const state = document.getElementById("status-state");
+        const stateEl = document.getElementById("status-state");
         const loaderEl = document.getElementById("status-loader");
         const aborts = document.getElementById("status-aborts");
         const bytes = document.getElementById("status-bytes");
         const banner = document.getElementById("status-banner");
         const reconnectForm = document.getElementById("reconnect-form");
         const paramsContainer = document.getElementById("params");
-        if (!state) return; // session section not in DOM
+        if (!stateEl) return;
         if (!j.open) {
-          state.textContent = "closed";
-          state.className = "state-pill state-closed";
+          stateEl.textContent = "closed";
+          stateEl.className = "state-pill state-closed";
           return;
         }
-        // Detect WTI-side disconnect: socket is dead but session is still
-        // "open" on our side. Show a reconnect prompt instead of pretending.
         const transportDead = j.transport && j.transport.connected === false;
         if (transportDead) {
-          state.textContent = "WTI DROPPED — Reconnect";
-          state.className = "state-pill state-missed";
+          stateEl.textContent = "WTI DROPPED — Reconnect";
+          stateEl.className = "state-pill state-missed";
           if (reconnectForm) reconnectForm.style.display = "";
           if (banner && j.transport.error) {
             banner.textContent = "WTI closed the socket: " + j.transport.error;
             banner.classList.remove("hidden");
           }
-          if (bytes) {
-            bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
-          }
+          if (bytes) bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
           return;
         }
         if (reconnectForm) reconnectForm.style.display = "none";
-        state.textContent = STATE_LABEL[j.state] || j.state;
-        state.className = "state-pill state-" + j.state;
+        stateEl.textContent = STATE_LABEL[j.state] || j.state;
+        stateEl.className = "state-pill state-" + j.state;
         if (loaderEl) loaderEl.textContent = j.loader ? "loader: " + j.loader : "";
         if (aborts) aborts.textContent = j.abort_chars_sent ? "abort: " + j.abort_chars_sent + "B sent" : "";
-        if (bytes && j.transport) {
-          bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
-        }
+        if (bytes && j.transport) bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";
         if (banner) {
           if (j.notes && j.notes.length) {
             banner.textContent = j.notes[j.notes.length - 1];
@@ -97,25 +182,16 @@
             banner.classList.add("hidden");
           }
         }
-
-        // Auto-load the params panel when we hit AT_PROMPT on a supported loader.
         if (paramsContainer && j.state === "at_prompt"
             && (j.loader === "vxworks" || j.loader === "ppcbug")) {
           if (paramsLoadedForLoader !== j.loader) {
             paramsLoadedForLoader = j.loader;
-            console.log("[bootsmith] loading params panel");
             paramsContainer.innerHTML = '<p class="hint">Loading saved params...</p>';
             fetch("/params").then(r => r.text()).then(html => {
               paramsContainer.innerHTML = html;
-              // Manually inserted DOM (not via htmx swap) — DO process
-              // it so the hx-attributes on the buttons get wired up.
               if (window.htmx) {
-                try { window.htmx.process(paramsContainer); }
-                catch (e) { console.error("[bootsmith] htmx.process failed", e); }
+                try { window.htmx.process(paramsContainer); } catch (_) {}
               }
-            }).catch(e => {
-              console.error("[bootsmith] /params fetch failed", e);
-              paramsContainer.innerHTML = '<p class="error">Failed to load params: ' + e + '</p>';
             });
           }
         } else if (j.state !== "at_prompt") {
@@ -131,207 +207,6 @@
         } catch (_) {}
       }
 
-      let ws = null;
-
-      function sendBytes(bytes) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        let buf;
-        if (typeof bytes === "string") {
-          buf = new Uint8Array(bytes.length);
-          for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i) & 0xff;
-        } else {
-          buf = bytes;
-        }
-        ws.send(buf);
-      }
-
-      // Pending text waiting to be flushed to #serial. Batching via
-      // requestAnimationFrame keeps the main thread responsive when
-      // the board emits a long burst of bytes (e.g. during a push):
-      // hundreds of WS messages get coalesced into one DOM append
-      // per frame instead of hundreds of forced layouts.
-      let __pendingSerialText = "";
-      let __serialRafScheduled = false;
-
-      function flushSerial() {
-        __serialRafScheduled = false;
-        try {
-          const pre = document.getElementById("serial");
-          if (!pre) {
-            __pendingSerialText = "";
-            return;
-          }
-          if (!__pendingSerialText) return;
-          pre.appendChild(document.createTextNode(__pendingSerialText));
-          __pendingSerialText = "";
-          if (pre.textContent.length > 200000) {
-            pre.textContent = pre.textContent.slice(-150000);
-          }
-          pre.scrollTop = pre.scrollHeight;
-        } catch (e) {
-          console.error("[bootsmith] flushSerial error", e);
-          __pendingSerialText = "";
-        }
-      }
-
-      function bytesAppendRaw(_pre, data) {
-        // data is a Uint8Array of raw bytes. _pre is ignored — we look
-        // it up fresh in flushSerial(); the parameter is kept for API
-        // compatibility with the call site.
-        let s = "";
-        for (let i = 0; i < data.length; i++) {
-          const c = data[i];
-          if (c === 13) continue;
-          if (c === 9 || c === 10 || (c >= 32 && c < 127)) {
-            s += String.fromCharCode(c);
-          } else {
-            s += "\\x" + c.toString(16).padStart(2, "0");
-          }
-        }
-        __pendingSerialText += s;
-        if (!__serialRafScheduled) {
-          __serialRafScheduled = true;
-          requestAnimationFrame(flushSerial);
-        }
-      }
-
-      // Bind terminal keydown ONCE at the document level via event
-      // delegation. The handler checks the event target and only acts
-      // when the source is #terminal-input. This survives any DOM
-      // churn — the input element can be detached/reattached and the
-      // listener still works because it lives on document, not on the
-      // input itself.
-      let __terminalDelegateBound = false;
-
-      function bindTerminal() {
-        const input = document.getElementById("terminal-input");
-        if (!input) return;
-        if (__terminalDelegateBound) {
-          // Already bound at document level; do nothing further. We
-          // deliberately do NOT auto-refocus the terminal input here,
-          // because that would steal focus from whatever the user was
-          // typing into (e.g. a profile-edit field) every time an htmx
-          // swap fires. Stray keystrokes would then end up at the WTI.
-          return;
-        }
-        __terminalDelegateBound = true;
-
-        const handler = (e) => {
-          if (e.target.id !== "terminal-input") return;
-          const input = e.target;
-          if (e.key === "Enter") {
-            e.preventDefault();
-            sendBytes("\r");
-            input.value = "";
-            return;
-          }
-          if (e.key === "Backspace") {
-            e.preventDefault();
-            sendBytes("\x7f");
-            input.value = input.value.slice(0, -1);
-            return;
-          }
-          if (e.key === "Tab") {
-            e.preventDefault();
-            sendBytes("\t");
-            return;
-          }
-          if (e.key === "Escape") {
-            e.preventDefault();
-            sendBytes("\x1b");
-            return;
-          }
-          if (e.ctrlKey && e.key.length === 1) {
-            const code = e.key.toUpperCase().charCodeAt(0);
-            if (code >= 0x40 && code <= 0x5f) {
-              e.preventDefault();
-              sendBytes(String.fromCharCode(code - 0x40));
-              return;
-            }
-          }
-          if (e.key.length === 1 && !e.metaKey && !e.altKey) {
-            e.preventDefault();
-            sendBytes(e.key);
-            input.value += e.key;
-            return;
-          }
-        };
-        document.addEventListener("keydown", handler);
-
-        // Click anywhere in the serial pane to refocus the input.
-        // Delegated at document level too, for the same reason.
-        document.addEventListener("click", (e) => {
-          if (e.target && e.target.id === "serial") {
-            const inp = document.getElementById("terminal-input");
-            if (inp) inp.focus();
-          }
-        });
-        // Initial focus only — subsequent re-binds (after htmx swaps)
-        // skip the focus call (see early return above).
-        input.focus();
-      }
-
-      let wsKeepalive = null;
-      let wsReconnectTimer = null;
-      let wsShouldStayOpen = false;
-      let wsBackoff = 1000;
-      let wsLastOpenAt = 0;
-
-      function openWS() {
-        const pre = document.getElementById("serial");
-        const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        console.log("[bootsmith] opening WebSocket");
-        wsLastOpenAt = Date.now();
-        try {
-          ws = new WebSocket(proto + "//" + location.host + "/ws/terminal");
-        } catch (e) {
-          console.warn("[bootsmith] ws ctor error", e);
-          scheduleWSReconnect();
-          return;
-        }
-        ws.binaryType = "arraybuffer";
-        ws.onopen = () => {
-          console.log("[bootsmith] ws open");
-          wsBackoff = 1000; // reset on a stable open
-          if (wsKeepalive) clearInterval(wsKeepalive);
-          wsKeepalive = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              try { ws.send("ping"); } catch (_) {}
-            }
-          }, 20000);
-        };
-        ws.onmessage = (ev) => {
-          if (typeof ev.data === "string") {
-            console.log("[bootsmith] ws msg:", ev.data);
-            return;
-          }
-          if (pre) bytesAppendRaw(pre, new Uint8Array(ev.data));
-        };
-        ws.onclose = () => {
-          console.log("[bootsmith] ws closed");
-          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
-          ws = null;
-          // Back off ONLY when the server closed us before sending
-          // anything useful (no session). Otherwise reconnect fast.
-          const lived = Date.now() - wsLastOpenAt;
-          if (lived < 200) {
-            wsBackoff = Math.min(wsBackoff * 2, 5000);
-          } else {
-            wsBackoff = 500;
-          }
-          if (wsShouldStayOpen) scheduleWSReconnect();
-        };
-        ws.onerror = (e) => console.warn("[bootsmith] ws error", e);
-      }
-
-      function scheduleWSReconnect() {
-        if (wsReconnectTimer || !wsShouldStayOpen) return;
-        wsReconnectTimer = setTimeout(() => {
-          wsReconnectTimer = null;
-          if (wsShouldStayOpen) openWS();
-        }, wsBackoff);
-      }
-
       function start(profile) {
         stop();
         lastProfile = profile;
@@ -339,7 +214,8 @@
         openWS();
         poll();
         pollTimer = setInterval(poll, 2000);
-        bindTerminal();
+        const inp = document.getElementById("terminal-input");
+        if (inp) inp.focus();
       }
 
       function stop() {
@@ -352,7 +228,6 @@
         paramsLoadedForLoader = null;
       }
 
-      // Decide whether to start/stop based on whether the session DOM is present.
       function reconcile() {
         const section = document.querySelector(".session[data-profile]");
         if (section) {
@@ -363,70 +238,8 @@
         }
       }
 
-      // Run on initial load and after every htmx swap.
       document.addEventListener("DOMContentLoaded", reconcile);
-      document.body.addEventListener("htmx:afterSwap", (e) => {
-        // htmx already processes the swapped content automatically;
-        // we do NOT call htmx.process again here. Doing so would
-        // double-bind handlers on the new DOM and has been observed
-        // to leave the UI unresponsive after a /params/push swap.
-        reconcile();
-        bindTerminal();
-        // After a swap of #params (push response or edit form),
-        // restore focus to the terminal input UNLESS the user is
-        // typing in an input/textarea/contenteditable. The active
-        // element after the swap is usually <body>, which makes the
-        // page feel unresponsive — keystrokes go nowhere because the
-        // doc-level keydown handler requires e.target.id ===
-        // "terminal-input".
-        const ae = document.activeElement;
-        const focusedSomeInput = ae && (
-          ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" ||
-          ae.isContentEditable
-        );
-        if (!focusedSomeInput) {
-          const inp = document.getElementById("terminal-input");
-          if (inp) inp.focus();
-        }
-      });
-
-      // Diagnostic strip in the header — updates on every htmx event so
-      // you can see at a glance what the client thinks is happening.
-      const diag = document.getElementById("diag");
-      function setDiag(msg) {
-        if (diag) diag.textContent = "diag: " + new Date().toLocaleTimeString() + " " + msg;
-      }
-
-      // Surface raw clicks so we can distinguish "click handler is dead"
-      // from "click handler ran but htmx didn't submit".
-      document.addEventListener("click", (e) => {
-        const t = e.target;
-        const tag = t && t.tagName ? t.tagName.toLowerCase() : "?";
-        const id = t && t.id ? "#" + t.id : "";
-        const cls = t && t.className && typeof t.className === "string"
-          ? "." + t.className.split(/\s+/).filter(Boolean).join(".")
-          : "";
-        const txt = t && t.textContent ? t.textContent.slice(0, 20) : "";
-        setDiag("click " + tag + id + cls + " '" + txt + "'");
-      }, true);  // capture phase so we see it even if something stops propagation
-      document.addEventListener("keydown", (e) => {
-        setDiag("keydown " + e.key + " on " + (e.target && e.target.id ? "#" + e.target.id : "?"));
-      }, true);
-      const HTMX_EVENTS = [
-        "htmx:beforeRequest", "htmx:beforeSend",
-        "htmx:xhr:loadstart", "htmx:xhr:loadend",
-        "htmx:afterRequest", "htmx:beforeSwap", "htmx:afterSwap",
-        "htmx:responseError", "htmx:sendError", "htmx:timeout",
-        "htmx:targetError", "htmx:swapError",
-      ];
-      HTMX_EVENTS.forEach((ev) => {
-        document.body.addEventListener(ev, (e) => {
-          const path = e.detail && e.detail.pathInfo
-            ? e.detail.pathInfo.requestPath
-            : (e.detail && e.detail.requestConfig ? e.detail.requestConfig.path : "?");
-          setDiag(ev.replace("htmx:", "") + " " + (path || ""));
-        });
-      });
+      document.body.addEventListener("htmx:afterSwap", reconcile);
     })();
   </script>
 </body>
