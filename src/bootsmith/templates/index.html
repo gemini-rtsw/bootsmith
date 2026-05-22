@@ -372,6 +372,22 @@
         // to leave the UI unresponsive after a /params/push swap.
         reconcile();
         bindTerminal();
+        // After a swap of #params (push response or edit form),
+        // restore focus to the terminal input UNLESS the user is
+        // typing in an input/textarea/contenteditable. The active
+        // element after the swap is usually <body>, which makes the
+        // page feel unresponsive — keystrokes go nowhere because the
+        // doc-level keydown handler requires e.target.id ===
+        // "terminal-input".
+        const ae = document.activeElement;
+        const focusedSomeInput = ae && (
+          ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" ||
+          ae.isContentEditable
+        );
+        if (!focusedSomeInput) {
+          const inp = document.getElementById("terminal-input");
+          if (inp) inp.focus();
+        }
       });
 
       // Diagnostic strip in the header — updates on every htmx event so
@@ -380,6 +396,22 @@
       function setDiag(msg) {
         if (diag) diag.textContent = "diag: " + new Date().toLocaleTimeString() + " " + msg;
       }
+
+      // Surface raw clicks so we can distinguish "click handler is dead"
+      // from "click handler ran but htmx didn't submit".
+      document.addEventListener("click", (e) => {
+        const t = e.target;
+        const tag = t && t.tagName ? t.tagName.toLowerCase() : "?";
+        const id = t && t.id ? "#" + t.id : "";
+        const cls = t && t.className && typeof t.className === "string"
+          ? "." + t.className.split(/\s+/).filter(Boolean).join(".")
+          : "";
+        const txt = t && t.textContent ? t.textContent.slice(0, 20) : "";
+        setDiag("click " + tag + id + cls + " '" + txt + "'");
+      }, true);  // capture phase so we see it even if something stops propagation
+      document.addEventListener("keydown", (e) => {
+        setDiag("keydown " + e.key + " on " + (e.target && e.target.id ? "#" + e.target.id : "?"));
+      }, true);
       const HTMX_EVENTS = [
         "htmx:beforeRequest", "htmx:beforeSend",
         "htmx:xhr:loadstart", "htmx:xhr:loadend",
