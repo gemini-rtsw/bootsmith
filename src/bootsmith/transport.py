@@ -346,14 +346,8 @@ class WTITransport:
                 while self._ring_len > self._ring_max and self._ring:
                     old = self._ring.popleft()
                     self._ring_len -= len(old)
-                fanout_n = len(self._subscribers)
                 for q in self._subscribers:
                     q.append(chunk)
-            if self._status.bytes_in % 5000 < len(chunk):
-                print(
-                    f"[telnet {self.host}:{self.port}] fanout n={fanout_n} bytes_in={self._status.bytes_in}",
-                    file=_sys.stderr, flush=True,
-                )
 
 
 # Default transport used by the rest of the app. Aliased so existing
@@ -487,33 +481,19 @@ class TelnetTransport:
             if seed_history:
                 for chunk in self._ring:
                     q.append(chunk)
-            n = len(self._subscribers)
-        print(
-            f"[telnet {self.host}:{self.port}] subscribe id={id(q)} n={n} seed={seed_history}",
-            file=sys.stderr, flush=True,
-        )
         return q
 
     def unsubscribe(self, q: deque[bytes]) -> None:
+        # Identity-based removal. list.remove() uses equality and two
+        # empty deques compare EQUAL -- so list.remove(driver_q) at the
+        # end of a dialogue could silently kick the SSE's (also empty)
+        # queue out of the subscriber list, leaving the live terminal
+        # never receiving more bytes. Use `is`.
         with self._lock:
-            # Use identity-based removal, not list.remove() which uses
-            # equality. Two empty deques compare EQUAL even though they
-            # are different objects -- so list.remove(driver_q) could
-            # silently remove sse_q if both were empty at that moment.
-            # That was the cause of the terminal hang: a driver's
-            # unsubscribe was kicking the SSE's queue out of the
-            # subscriber list, after which fanout no longer fed SSE.
-            removed = False
             for i, s in enumerate(self._subscribers):
                 if s is q:
                     del self._subscribers[i]
-                    removed = True
                     break
-            n = len(self._subscribers)
-        print(
-            f"[telnet {self.host}:{self.port}] unsubscribe id={id(q)} removed={removed} n={n}",
-            file=sys.stderr, flush=True,
-        )
 
     def snapshot(self) -> bytes:
         with self._lock:
@@ -559,11 +539,5 @@ class TelnetTransport:
                 while self._ring_len > self._ring_max and self._ring:
                     old = self._ring.popleft()
                     self._ring_len -= len(old)
-                fanout_n = len(self._subscribers)
                 for q in self._subscribers:
                     q.append(chunk)
-            if self._status.bytes_in % 5000 < len(chunk):
-                print(
-                    f"[telnet {self.host}:{self.port}] fanout n={fanout_n} bytes_in={self._status.bytes_in}",
-                    file=_sys.stderr, flush=True,
-                )
