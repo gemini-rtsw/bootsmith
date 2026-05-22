@@ -38,6 +38,9 @@
                 hx-post="/profiles/{{ p.name }}/update"
                 hx-target="#main"
                 hx-swap="innerHTML">
+            <div class="row" style="margin-bottom:8px;">
+              <button type="submit" class="primary">Save</button>
+            </div>
             <h4>Connection</h4>
             <div class="grid">
               <label>Name <input name="new_name" required value="{{ p.name }}"
