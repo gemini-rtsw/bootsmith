@@ -512,11 +512,21 @@ def _walk(
                     f"(`.` aborts the dialogue in PPCBug)"
                 )
             else:
+                # PPCBug Y/N fields only accept lowercase y/n -- typing
+                # uppercase Y leaves the field unchanged. Force lowercase
+                # for any single-character Y/N value on a [Y/N] prompt.
+                send_value = raw_value
+                if (
+                    "[Y/N]" in actual_label
+                    and len(send_value) == 1
+                    and send_value.upper() in ("Y", "N")
+                ):
+                    send_value = send_value.lower()
                 _log(
                     f"_walk({command}) field {fields_processed + 1}: "
-                    f"{actual_label!r} (key={key}) -> sending {raw_value!r}"
+                    f"{actual_label!r} (key={key}) -> sending {send_value!r}"
                 )
-                for ch in raw_value.encode():
+                for ch in send_value.encode():
                     transport.write(bytes([ch]))
                     time.sleep(0.010)
                 transport.write(b"\r")
