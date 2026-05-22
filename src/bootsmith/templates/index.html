@@ -23,6 +23,18 @@
   </footer>
 
   <script>
+    // Surface any uncaught JS errors and unhandled promise rejections
+    // visibly in the diag strip so we can debug them without devtools.
+    window.addEventListener("error", (e) => {
+      const diag = document.getElementById("diag");
+      if (diag) diag.textContent = "JS ERR: " + (e.message || "?") + " @ " + (e.filename || "?") + ":" + (e.lineno || "?");
+      console.error("[bootsmith] uncaught", e.error || e);
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      const diag = document.getElementById("diag");
+      if (diag) diag.textContent = "JS REJ: " + (e.reason && e.reason.message ? e.reason.message : String(e.reason));
+      console.error("[bootsmith] unhandled rejection", e.reason);
+    });
     // Live-session controller. Loaded once with the page so it survives
     // htmx swaps that bring the .session fragment in or out of #main.
     (function () {
@@ -95,7 +107,15 @@
             paramsContainer.innerHTML = '<p class="hint">Loading saved params...</p>';
             fetch("/params").then(r => r.text()).then(html => {
               paramsContainer.innerHTML = html;
-              if (window.htmx) window.htmx.process(paramsContainer);
+              // Manually inserted DOM (not via htmx swap) — DO process
+              // it so the hx-attributes on the buttons get wired up.
+              if (window.htmx) {
+                try { window.htmx.process(paramsContainer); }
+                catch (e) { console.error("[bootsmith] htmx.process failed", e); }
+              }
+            }).catch(e => {
+              console.error("[bootsmith] /params fetch failed", e);
+              paramsContainer.innerHTML = '<p class="error">Failed to load params: ' + e + '</p>';
             });
           }
         } else if (j.state !== "at_prompt") {
@@ -135,18 +155,23 @@
 
       function flushSerial() {
         __serialRafScheduled = false;
-        const pre = document.getElementById("serial");
-        if (!pre) {
+        try {
+          const pre = document.getElementById("serial");
+          if (!pre) {
+            __pendingSerialText = "";
+            return;
+          }
+          if (!__pendingSerialText) return;
+          pre.appendChild(document.createTextNode(__pendingSerialText));
           __pendingSerialText = "";
-          return;
+          if (pre.textContent.length > 200000) {
+            pre.textContent = pre.textContent.slice(-150000);
+          }
+          pre.scrollTop = pre.scrollHeight;
+        } catch (e) {
+          console.error("[bootsmith] flushSerial error", e);
+          __pendingSerialText = "";
         }
-        if (!__pendingSerialText) return;
-        pre.appendChild(document.createTextNode(__pendingSerialText));
-        __pendingSerialText = "";
-        if (pre.textContent.length > 200000) {
-          pre.textContent = pre.textContent.slice(-150000);
-        }
-        pre.scrollTop = pre.scrollHeight;
       }
 
       function bytesAppendRaw(_pre, data) {
@@ -341,10 +366,11 @@
       // Run on initial load and after every htmx swap.
       document.addEventListener("DOMContentLoaded", reconcile);
       document.body.addEventListener("htmx:afterSwap", (e) => {
+        // htmx already processes the swapped content automatically;
+        // we do NOT call htmx.process again here. Doing so would
+        // double-bind handlers on the new DOM and has been observed
+        // to leave the UI unresponsive after a /params/push swap.
         reconcile();
-        if (e.detail && e.detail.target && window.htmx) {
-          try { window.htmx.process(e.detail.target); } catch (_) {}
-        }
         bindTerminal();
       });
 
