@@ -252,8 +252,13 @@ def write_params(
     except Exception:
         pass
     time.sleep(0.2)
+    # Walk ENV all the way to the natural end. Aborting with `.` after
+    # the last user-editable field rolls back changes made to fields
+    # touched mid-dialogue (e.g. Network Auto Boot Enable Y was typed
+    # but the abort dropped it before commit). Slower (~30s) but
+    # values actually save.
     env = _walk(transport, "ENV", ENV_FIELDS, values=values, timeout=timeout,
-                stop_after_last_of=set(ENV_USER_EDITABLE_KEYS))
+                stop_after_last_of=None)
     return WriteResult(
         raw=niot.raw + env.raw,
         fields_written=niot.fields_written + env.fields_written,
