@@ -254,11 +254,21 @@ def create_app() -> Flask:
         sess = sessions.current()
         if sess is None:
             return _error("no session open"), 404
-        return Response(
+        resp = Response(
             stream_with_context(_sse(sess)),
             mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "close",
+            },
         )
+        # Disable Flask's default HTTP/1.1 connection reuse for this
+        # endpoint -- the SSE stream needs its own dedicated TCP
+        # connection so the worker isn't asked to multiplex SSE chunks
+        # with other XHRs from the same client.
+        resp.headers["Connection"] = "close"
+        return resp
 
     @sock.route("/ws/terminal")
     def ws_terminal(ws):
@@ -638,13 +648,17 @@ def _sse(sess):
                 yield f"event: chunk\ndata: {_b64(chunk)}\n\n"
             else:
                 now = time.time()
-                if now - last_keepalive > 15:
+                # Send a keepalive comment frequently (every 1s) to keep
+                # the gevent worker's response-writer flushing. Without
+                # frequent writes the connection can stall mid-burst on
+                # some WSGI servers / proxies.
+                if now - last_keepalive > 1.0:
                     yield ": keepalive\n\n"
                     last_keepalive = now
                 time.sleep(0.05)
-            if not transport.status().connected:
-                yield "event: closed\ndata: \n\n"
-                return
+            # Don't exit on a transient transport-disconnect: the
+            # browser can re-attach when the transport reopens. Leave
+            # the generator running.
     finally:
         transport.unsubscribe(q)
         print(
