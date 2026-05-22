@@ -631,13 +631,21 @@ def _sse(sess):
 
     transport = sess.transport
     print(
-        f"[sse] subscriber attached for {sess.profile.name} ({transport.host}:{transport.port})",
+        f"[sse] subscriber attached for {sess.profile.name} "
+        f"({transport.host}:{transport.port}) "
+        f"transport_id={id(transport)}",
         file=sys.stderr,
         flush=True,
     )
     snapshot = transport.snapshot()
     yield f"event: snapshot\ndata: {_b64(snapshot)}\n\n"
     q = transport.subscribe()
+    print(
+        f"[sse] q={id(q)} transport_id={id(transport)} "
+        f"subscribers_id={id(transport._subscribers)} "
+        f"q_in_subs={any(s is q for s in transport._subscribers)}",
+        file=sys.stderr, flush=True,
+    )
     last_keepalive = time.time()
     chunks_sent = 0
     last_heartbeat = time.time()
@@ -648,7 +656,10 @@ def _sse(sess):
             # generator is still iterating at all.
             if now - last_heartbeat > 5.0:
                 print(
-                    f"[sse] heartbeat chunks_sent={chunks_sent} qlen={len(q)}",
+                    f"[sse] heartbeat chunks_sent={chunks_sent} qlen={len(q)} "
+                    f"q_id={id(q)} subs_count={len(transport._subscribers)} "
+                    f"q_in_subs={any(s is q for s in transport._subscribers)} "
+                    f"sess_transport_same={sess.transport is transport}",
                     file=sys.stderr, flush=True,
                 )
                 last_heartbeat = now
