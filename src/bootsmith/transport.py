@@ -268,10 +268,12 @@ class WTITransport:
 
     def unsubscribe(self, q: deque[bytes]) -> None:
         with self._lock:
-            try:
-                self._subscribers.remove(q)
-            except ValueError:
-                pass
+            # Identity-based removal -- two empty deques are == so
+            # list.remove() can silently kick the wrong subscriber.
+            for i, s in enumerate(self._subscribers):
+                if s is q:
+                    del self._subscribers[i]
+                    break
         self._log_subs(f"unsubscribe (id={id(q)})")
 
     def snapshot(self) -> bytes:
@@ -494,11 +496,19 @@ class TelnetTransport:
 
     def unsubscribe(self, q: deque[bytes]) -> None:
         with self._lock:
-            try:
-                self._subscribers.remove(q)
-                removed = True
-            except ValueError:
-                removed = False
+            # Use identity-based removal, not list.remove() which uses
+            # equality. Two empty deques compare EQUAL even though they
+            # are different objects -- so list.remove(driver_q) could
+            # silently remove sse_q if both were empty at that moment.
+            # That was the cause of the terminal hang: a driver's
+            # unsubscribe was kicking the SSE's queue out of the
+            # subscriber list, after which fanout no longer fed SSE.
+            removed = False
+            for i, s in enumerate(self._subscribers):
+                if s is q:
+                    del self._subscribers[i]
+                    removed = True
+                    break
             n = len(self._subscribers)
         print(
             f"[telnet {self.host}:{self.port}] unsubscribe id={id(q)} removed={removed} n={n}",
