@@ -45,6 +45,18 @@ def create_app() -> Flask:
     # (they would fight for queue subscribers and produce interleaved
     # nonsense).
     app.config["push_lock"] = threading.Lock()
+    # In-memory state for the latest async push job. Single-session app,
+    # so one slot is enough. See /params/push (queues a job) and
+    # /params/push/status (polls it).
+    app.config["push_job"] = {
+        "id": 0,
+        "state": "idle",        # idle | running | done | error
+        "started_at": 0.0,
+        "finished_at": 0.0,
+        "verify_html": "",      # rendered _params_verify.html when done
+        "error": "",
+    }
+    app.config["push_job_lock"] = threading.Lock()
     sock = Sock(app)
 
     @app.get("/")
@@ -396,7 +408,14 @@ def create_app() -> Flask:
 
     @app.post("/params/push")
     def params_push():
-        """Push the saved profile's boot_params to the board, then verify."""
+        """Kick off a push in a background thread, return immediately.
+
+        Long pushes (~25s for PPCBug ENV walks) were blocking Werkzeug
+        from servicing the SSE terminal stream, which made the UI feel
+        frozen. Now we queue the work and respond instantly with a
+        "running" panel; the client polls /params/push/status until
+        the job is "done" and then renders the verify panel inline.
+        """
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
         if sess is None:
@@ -407,39 +426,96 @@ def create_app() -> Flask:
         driver = _driver_for(ws.loader or "")
         if driver is None:
             return _error(f"no driver for loader {ws.loader!r}"), 400
-        values = dict(sess.profile.boot_params)
+
         lock: threading.Lock = app.config["push_lock"]
         if not lock.acquire(blocking=False):
             return _error("another push is already in progress"), 409
-        try:
-            driver.write_params(sess.transport, values)
-            verify = driver.read_params(sess.transport)
-        except ConnectionError as e:
-            return _error(f"WTI session is dead during push: {e}. Reconnect and retry."), 502
-        finally:
-            lock.release()
-        fields = schemas_mod.fields_for(ws.loader)
-        diff = []
-        for _label, key in fields:
-            want = values.get(key, "")
-            got = verify.params.get(key, "")
-            if not want:
-                continue
-            if want == ".":
-                # We asked the board to clear this field. Success means the
-                # field is absent from readback (or empty).
-                if got:
-                    diff.append({"key": key, "want": "(cleared)", "got": got})
-                continue
-            if want != got:
-                diff.append({"key": key, "want": want, "got": got})
+
+        values = dict(sess.profile.boot_params)
+        loader = ws.loader
+        fields = schemas_mod.fields_for(loader)
+        profile_name = sess.profile.name
+        transport = sess.transport
+        profile = sess.profile
+
+        job = app.config["push_job"]
+        job_lock: threading.Lock = app.config["push_job_lock"]
+        with job_lock:
+            job["id"] += 1
+            job["state"] = "running"
+            job["started_at"] = time.time()
+            job["finished_at"] = 0.0
+            job["verify_html"] = ""
+            job["error"] = ""
+
+        def _runner():
+            try:
+                driver.write_params(transport, values)
+                verify = driver.read_params(transport)
+                diff = []
+                for _label, key in fields:
+                    want = values.get(key, "")
+                    got = verify.params.get(key, "")
+                    if not want:
+                        continue
+                    if want == ".":
+                        if got:
+                            diff.append({"key": key, "want": "(cleared)", "got": got})
+                        continue
+                    if want != got:
+                        diff.append({"key": key, "want": want, "got": got})
+                with app.app_context():
+                    html = render_template(
+                        "_params_verify.html",
+                        profile=profile,
+                        fields=fields,
+                        current=verify.params,
+                        wrote=values,
+                        diff=diff,
+                    )
+                with job_lock:
+                    job["state"] = "done"
+                    job["verify_html"] = html
+                    job["finished_at"] = time.time()
+            except Exception as e:
+                with job_lock:
+                    job["state"] = "error"
+                    job["error"] = str(e)
+                    job["finished_at"] = time.time()
+            finally:
+                lock.release()
+
+        t = threading.Thread(target=_runner, daemon=True, name=f"push-{job['id']}")
+        t.start()
+
         return render_template(
-            "_params_verify.html",
-            profile=sess.profile,
-            fields=fields,
-            current=verify.params,
-            wrote=values,
-            diff=diff,
+            "_params_running.html",
+            profile=profile,
+        )
+
+    @app.get("/params/push/status")
+    def params_push_status():
+        """Return the latest push job state. While running, returns a
+        "still running" snippet for hx-swap; when done, returns the
+        verify panel; on error, returns an error snippet."""
+        job = app.config["push_job"]
+        job_lock: threading.Lock = app.config["push_job_lock"]
+        with job_lock:
+            state = job["state"]
+            html = job["verify_html"]
+            err = job["error"]
+        if state == "done":
+            return html
+        if state == "error":
+            return f'<div class="error">push failed: {err}</div>' + render_template(
+                "_params_actions.html"
+            )
+        # running or idle: keep showing the running panel; client polls.
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        return render_template(
+            "_params_running.html",
+            profile=(sess.profile if sess else None),
         )
 
     @app.post("/params/boot")

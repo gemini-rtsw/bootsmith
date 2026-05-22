@@ -10,8 +10,6 @@ requires-python = ">=3.10"
 dependencies = [
     "flask>=3.0",
     "flask-sock>=0.7",
-    "gunicorn>=21.0",
-    "gevent>=23.0",
 ]
 
 [project.scripts]

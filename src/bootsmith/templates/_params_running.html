@@ -1,0 +1,11 @@
+<h3>Pushing to {{ profile.name if profile else "board" }}...</h3>
+<p class="hint">Walking the boot dialogue. Watch the terminal for live progress.
+This panel will update when the push finishes (usually ~10-30s).</p>
+
+<div hx-get="/params/push/status"
+     hx-trigger="load delay:1s"
+     hx-target="#params"
+     hx-swap="innerHTML">
+</div>
+
+{% include "_params_actions.html" %}
