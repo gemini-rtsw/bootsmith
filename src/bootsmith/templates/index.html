@@ -35,10 +35,9 @@
         missed: "no prompt detected",
       };
 
-      let ws = null;
-      let wsReconnectTimer = null;
-      let wsKeepalive = null;
-      let wsShouldStayOpen = false;
+      let sse = null;
+      let sseReconnectTimer = null;
+      let sseShouldStayOpen = false;
       let pollTimer = null;
       let lastProfile = null;
       let paramsLoadedForLoader = null;
@@ -63,51 +62,60 @@
         pre.scrollTop = pre.scrollHeight;
       }
 
-      function sendBytes(bytes) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        if (typeof bytes === "string") {
-          const buf = new Uint8Array(bytes.length);
-          for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i) & 0xff;
-          ws.send(buf);
-        } else {
-          ws.send(bytes);
-        }
+      function b64ToBytes(b64) {
+        const bin = atob(b64);
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) & 0xff;
+        return out;
       }
 
-      function openWS() {
-        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      function bytesToB64(bytes) {
+        let s = "";
+        for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+        return btoa(s);
+      }
+
+      function sendBytes(bytes) {
+        let buf;
+        if (typeof bytes === "string") {
+          buf = new Uint8Array(bytes.length);
+          for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i) & 0xff;
+        } else {
+          buf = bytes;
+        }
+        const form = new FormData();
+        form.append("b", bytesToB64(buf));
+        fetch("/session/key", { method: "POST", body: form }).catch(() => {});
+      }
+
+      function openSSE() {
         try {
-          ws = new WebSocket(proto + "//" + location.host + "/ws/terminal");
+          sse = new EventSource("/session/stream");
         } catch (e) {
-          scheduleWSReconnect();
+          scheduleSSEReconnect();
           return;
         }
-        ws.binaryType = "arraybuffer";
-        ws.onopen = () => {
-          if (wsKeepalive) clearInterval(wsKeepalive);
-          wsKeepalive = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              try { ws.send("ping"); } catch (_) {}
-            }
-          }, 20000);
+        sse.addEventListener("snapshot", (ev) => {
+          try { appendSerial(b64ToBytes(ev.data)); } catch (_) {}
+        });
+        sse.addEventListener("chunk", (ev) => {
+          try { appendSerial(b64ToBytes(ev.data)); } catch (_) {}
+        });
+        sse.addEventListener("closed", () => {
+          if (sse) { try { sse.close(); } catch (_) {} sse = null; }
+          if (sseShouldStayOpen) scheduleSSEReconnect();
+        });
+        sse.onerror = () => {
+          if (sse) { try { sse.close(); } catch (_) {} sse = null; }
+          if (sseShouldStayOpen) scheduleSSEReconnect();
         };
-        ws.onmessage = (ev) => {
-          if (typeof ev.data === "string") return;
-          appendSerial(new Uint8Array(ev.data));
-        };
-        ws.onclose = () => {
-          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
-          ws = null;
-          if (wsShouldStayOpen) scheduleWSReconnect();
-        };
-        ws.onerror = () => {};
       }
 
-      function scheduleWSReconnect() {
-        if (wsReconnectTimer || !wsShouldStayOpen) return;
-        wsReconnectTimer = setTimeout(() => {
-          wsReconnectTimer = null;
-          if (wsShouldStayOpen) openWS();
+      function scheduleSSEReconnect() {
+        if (sseReconnectTimer || !sseShouldStayOpen) return;
+        sseReconnectTimer = setTimeout(() => {
+          sseReconnectTimer = null;
+          if (sseShouldStayOpen) openSSE();
         }, 1000);
       }
 
@@ -210,8 +218,8 @@
       function start(profile) {
         stop();
         lastProfile = profile;
-        wsShouldStayOpen = true;
-        openWS();
+        sseShouldStayOpen = true;
+        openSSE();
         poll();
         pollTimer = setInterval(poll, 2000);
         const inp = document.getElementById("terminal-input");
@@ -219,10 +227,9 @@
       }
 
       function stop() {
-        wsShouldStayOpen = false;
-        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
-        if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
-        if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+        sseShouldStayOpen = false;
+        if (sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
+        if (sse) { try { sse.close(); } catch (_) {} sse = null; }
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         lastProfile = null;
         paramsLoadedForLoader = null;
