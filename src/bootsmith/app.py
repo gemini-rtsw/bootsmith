@@ -653,9 +653,18 @@ def _sse(sess):
                 )
                 last_heartbeat = now
             if q:
-                chunk = q.popleft()
-                chunks_sent += 1
-                yield f"event: chunk\ndata: {_b64(chunk)}\n\n"
+                # Coalesce every currently-queued chunk into ONE yield
+                # to minimize the number of writes the gevent worker
+                # has to make. Per-chunk yields here block when the
+                # client's TCP receive window is small / contended,
+                # causing the SSE generator to deadlock on a yield.
+                merged = bytearray()
+                drained = 0
+                while q:
+                    merged.extend(q.popleft())
+                    drained += 1
+                chunks_sent += drained
+                yield f"event: chunk\ndata: {_b64(bytes(merged))}\n\n"
             else:
                 if now - last_keepalive > 1.0:
                     yield ": keepalive\n\n"
