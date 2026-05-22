@@ -241,14 +241,14 @@ def read_params(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
         transport.write(b"\r")
     except Exception:
         pass
-    time.sleep(0.2)
+    time.sleep(0.1)
     niot = _walk(transport, "NIOT", NIOT_FIELDS, values={}, timeout=timeout,
                  stop_after_last_of=None)
     try:
         transport.write(b"\r")
     except Exception:
         pass
-    time.sleep(0.2)
+    time.sleep(0.1)
     env = _walk(transport, "ENV", ENV_FIELDS, values={}, timeout=timeout,
                 stop_after_last_of=set(ENV_USER_EDITABLE_KEYS))
     merged_params: dict[str, str] = {}
@@ -274,7 +274,7 @@ def write_params(
         transport.write(b"\r")
     except Exception:
         pass
-    time.sleep(0.2)
+    time.sleep(0.1)
     # Walk ENV all the way to the natural end. Aborting with `.` after
     # the last user-editable field rolls back changes made to fields
     # touched mid-dialogue (e.g. Network Auto Boot Enable Y was typed
@@ -609,7 +609,7 @@ def _walk(
                     )
                     for ch in b"NULL":
                         transport.write(bytes([ch]))
-                        time.sleep(0.010)
+                        time.sleep(0.002)
                     transport.write(b"\r")
                     if key:
                         fields_written.append(key)
