@@ -171,6 +171,10 @@ ENV_FIELDS: tuple[tuple[str, str], ...] = (
 # still walks all of ENV under the hood; this is just the schema for the
 # edit form.
 ENV_USER_EDITABLE_KEYS: tuple[str, ...] = (
+    # Network PReP-Boot Mode Enable: Gemini sets Y, default is N.
+    "env_prep_boot",
+    # Negate VMEbus SYSFAIL* Always: Gemini sets Y, default is N.
+    "env_negate_sysfail",
     "env_auto_boot_enable",
     "env_auto_boot_powerup_only",
     "env_net_auto_boot_enable",
