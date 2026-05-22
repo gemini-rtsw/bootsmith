@@ -4,6 +4,7 @@
 <p class="hint">
   <strong>Blank</strong> = keep current value on the board.
   Type <code>.</code> (a single dot) to <strong>clear</strong> the field on the board.
+  {% if loader == "ppcbug" %}On PPCBug, either <code>.</code> or the literal <code>NULL</code> means "no value" (use for Boot/Argument File Name).{% endif %}
   Anything else is written as-is.
 </p>
 <div class="grid params-grid">

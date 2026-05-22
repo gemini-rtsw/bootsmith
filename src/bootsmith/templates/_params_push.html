@@ -3,5 +3,9 @@
 <p class="hint">
   Blank in profile = keep current value on board.
   <code>.</code> in a field = clear that field on board.
+  {% if profile.loader_hint == "ppcbug" %}
+    On PPCBug, both <code>.</code> and the literal <code>NULL</code> mean
+    "no value" (e.g. for Boot/Argument File Name).
+  {% endif %}
 </p>
 {% include "_params_actions.html" %}

@@ -586,14 +586,25 @@ def _walk(
                     f"{actual_label!r} (key={key}) keep"
                 )
             elif raw_value == ".":
-                # `.` inside dialogue aborts. Don't expose that semantic
-                # to user-supplied values; treat as keep instead.
-                transport.write(b"\r")
+                # `.` typed at a PPCBug NIOT/ENV prompt aborts the
+                # dialogue, which is never what the user means here.
+                # The user is borrowing the VxWorks "clear field"
+                # convention. PPCBug's actual "no value" semantic for
+                # file-name fields is the literal string NULL; for
+                # other fields, blank/0 is the empty state. We send
+                # NULL -- the firmware accepts it for the file-name
+                # slots and harmlessly stores it as a value elsewhere
+                # (caller should not put `.` in non-file-name fields).
                 _log(
                     f"_walk({command}) field {fields_processed + 1}: "
-                    f"{actual_label!r} value '.' treated as keep "
-                    f"(`.` aborts the dialogue in PPCBug)"
+                    f"{actual_label!r} value '.' -> sending 'NULL'"
                 )
+                for ch in b"NULL":
+                    transport.write(bytes([ch]))
+                    time.sleep(0.010)
+                transport.write(b"\r")
+                if key:
+                    fields_written.append(key)
             else:
                 # PPCBug Y/N fields only accept lowercase y/n -- typing
                 # uppercase Y leaves the field unchanged. Force lowercase

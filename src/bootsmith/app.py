@@ -489,7 +489,10 @@ def create_app() -> Flask:
                     if not want:
                         continue
                     if want == ".":
-                        if got:
+                        # VxWorks: `.` clears -> readback should be empty.
+                        # PPCBug: driver translates `.` -> NULL, so an
+                        # empty readback OR a literal NULL is success.
+                        if got and got.upper() != "NULL":
                             diff.append({"key": key, "want": "(cleared)", "got": got})
                         continue
                     # Single-character values (Y/N/A/W/B/S/G/M etc.)
