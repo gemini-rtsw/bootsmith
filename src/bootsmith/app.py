@@ -640,25 +640,27 @@ def _sse(sess):
     q = transport.subscribe()
     last_keepalive = time.time()
     chunks_sent = 0
+    last_heartbeat = time.time()
     try:
         while True:
+            now = time.time()
+            # Hard heartbeat every 5s so we can see in stderr whether the
+            # generator is still iterating at all.
+            if now - last_heartbeat > 5.0:
+                print(
+                    f"[sse] heartbeat chunks_sent={chunks_sent} qlen={len(q)}",
+                    file=sys.stderr, flush=True,
+                )
+                last_heartbeat = now
             if q:
                 chunk = q.popleft()
                 chunks_sent += 1
                 yield f"event: chunk\ndata: {_b64(chunk)}\n\n"
             else:
-                now = time.time()
-                # Send a keepalive comment frequently (every 1s) to keep
-                # the gevent worker's response-writer flushing. Without
-                # frequent writes the connection can stall mid-burst on
-                # some WSGI servers / proxies.
                 if now - last_keepalive > 1.0:
                     yield ": keepalive\n\n"
                     last_keepalive = now
                 time.sleep(0.05)
-            # Don't exit on a transient transport-disconnect: the
-            # browser can re-attach when the transport reopens. Leave
-            # the generator running.
     finally:
         transport.unsubscribe(q)
         print(
