@@ -488,7 +488,7 @@ class TelnetTransport:
             n = len(self._subscribers)
         print(
             f"[telnet {self.host}:{self.port}] subscribe id={id(q)} n={n} seed={seed_history}",
-            file=_sys.stderr, flush=True,
+            file=sys.stderr, flush=True,
         )
         return q
 
@@ -502,7 +502,7 @@ class TelnetTransport:
             n = len(self._subscribers)
         print(
             f"[telnet {self.host}:{self.port}] unsubscribe id={id(q)} removed={removed} n={n}",
-            file=_sys.stderr, flush=True,
+            file=sys.stderr, flush=True,
         )
 
     def snapshot(self) -> bytes:
