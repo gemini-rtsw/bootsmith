@@ -343,6 +343,81 @@ def write_params(
     )
 
 
+def read_cnfg(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
+    """Run `CNFG` (read-only) and parse the 10 VPD fields.
+
+    `CNFG` (no `;M`) just dumps the Board Information Block without
+    prompting. Each line is `LABEL = VALUE` where VALUE is either a
+    quoted ASCII string (`"5195622     "`) or a bare hex string
+    (`08003E2E8946`). On a board with a bad checksum the values
+    contain garbage characters (`?`, `U`, `E`) but the field labels
+    are still recognizable.
+
+    Returns ReadResult.params keyed by CNFG_FIELDS keys; the values
+    are stripped of surrounding quotes and trailing spaces.
+    """
+    try:
+        transport.write(b"\r")
+    except Exception:
+        pass
+    time.sleep(0.1)
+
+    q = transport.subscribe(seed_history=False)
+    raw_buf = bytearray()
+    params: dict[str, str] = {}
+    label_to_key = {label: key for label, key in CNFG_FIELDS}
+
+    def drain():
+        while q:
+            raw_buf.extend(q.popleft())
+
+    try:
+        transport.write(b"CNFG\r")
+        deadline = time.time() + timeout
+        # Wait for the dialogue to print all lines and return to PPC1-Bug>.
+        # CNFG is non-interactive so we just wait for the closing prompt.
+        last_change = time.time()
+        last_len = 0
+        while time.time() < deadline:
+            drain()
+            if len(raw_buf) != last_len:
+                last_len = len(raw_buf)
+                last_change = time.time()
+            if PROMPT_RE.search(bytes(raw_buf[-200:])):
+                # Allow ~0.2s of quiet first so any straggler bytes
+                # arrive before we parse.
+                if time.time() - last_change > 0.2:
+                    break
+            time.sleep(0.05)
+        else:
+            _log(f"read_cnfg: timed out after {timeout}s; parsing what we have")
+
+        text = bytes(raw_buf).decode(errors="replace")
+        for line in text.splitlines():
+            if "=" not in line:
+                continue
+            label_part, _, value_part = line.partition("=")
+            label = label_part.strip()
+            key = label_to_key.get(label)
+            if key is None:
+                continue
+            value = value_part.strip()
+            # Strip surrounding double quotes if present.
+            if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+                value = value[1:-1]
+            # Trim trailing space-padding the board uses to fill the
+            # fixed-width field; user-supplied values will be re-padded
+            # by the board on write.
+            value = value.rstrip()
+            params[key] = value
+
+        _log(f"read_cnfg: parsed {len(params)}/{len(CNFG_FIELDS)} fields")
+    finally:
+        transport.unsubscribe(q)
+
+    return ReadResult(params=params, raw=bytes(raw_buf))
+
+
 def write_cnfg(
     transport: WTITransport,
     values: dict[str, str],

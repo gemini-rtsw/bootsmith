@@ -621,15 +621,45 @@ def create_app() -> Flask:
 
     @app.get("/params/cnfg")
     def params_cnfg_form():
-        """Show the one-shot VPD repair form (CNFG;M)."""
+        """Show the one-shot VPD repair form (CNFG;M).
+
+        Reads the board's current VPD via `CNFG` first so the form can
+        pre-fill each field with whatever is on the board today --
+        garbage values mean a corrupt block that needs repair; sane
+        values let the user spot which fields actually need editing.
+        """
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
         if sess is None:
             return _error("no session open"), 404
-        loader = sess.watcher.status().loader or sess.profile.loader_hint
+        ws = sess.watcher.status()
+        loader = ws.loader or sess.profile.loader_hint
         if loader != "ppcbug":
             return _error(f"CNFG only supported on PPCBug (loader={loader!r})"), 400
-        return render_template("_params_cnfg.html", profile=sess.profile)
+
+        current: dict[str, str] = {}
+        read_error = ""
+        if ws.state == "at_prompt":
+            lock: threading.Lock = app.config["push_lock"]
+            if lock.acquire(blocking=False):
+                try:
+                    result = ppcbug_mod.read_cnfg(sess.transport)
+                    current = result.params
+                except Exception as e:
+                    read_error = str(e)
+                finally:
+                    lock.release()
+            else:
+                read_error = "another operation is running; current values not read"
+        else:
+            read_error = f"board not at a prompt (state={ws.state}); current values not read"
+
+        return render_template(
+            "_params_cnfg.html",
+            profile=sess.profile,
+            current=current,
+            read_error=read_error,
+        )
 
     @app.post("/params/cnfg/run")
     def params_cnfg_run():
