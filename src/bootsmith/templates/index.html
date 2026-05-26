@@ -145,6 +145,11 @@
       });
       document.addEventListener("click", (e) => {
         if (e.target && e.target.id === "serial") {
+          // Don't steal focus if the user just finished a text
+          // selection -- stealing focus collapses the selection and
+          // breaks copy from the serial pane.
+          const sel = window.getSelection && window.getSelection();
+          if (sel && sel.toString().length > 0) return;
           const inp = document.getElementById("terminal-input");
           if (inp) inp.focus();
         }
