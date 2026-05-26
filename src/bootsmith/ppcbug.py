@@ -227,16 +227,36 @@ FIELDS: tuple[tuple[str, str], ...] = NIOT_FIELDS + tuple(
 # is (label, key, command-to-send). The Diag button walks this list in order
 # and only sends commands whose key is enabled in profile.diag_commands.
 DIAG_COMMANDS: tuple[tuple[str, str, str], ...] = (
-    ("Quick Self Test (QST)",            "diag_qst",     "QST"),
-    ("Full Self Test (ST)",              "diag_st",      "ST"),
-    ("RAM tests",                        "diag_ram",     "RAM"),
-    ("L2 Cache tests",                   "diag_l2cache", "L2CACHE"),
-    ("Ethernet controller (DEC21x4x)",   "diag_dec",     "DEC"),
-    ("NCR 53C8XX SCSI",                  "diag_ncr",     "NCR"),
-    ("EIDE tests",                       "diag_eide",    "EIDE"),
-    ("Real-time clock (RTC)",            "diag_rtc",     "RTC"),
-    ("Serial I/O (UART)",                "diag_uart",    "UART"),
-    ("Display errors after run (DE)",    "diag_de",      "DE"),
+    # Self-test umbrellas first.
+    ("Quick Self Test",                       "diag_qst",       "QST"),
+    ("Full Self Test",                        "diag_st",        "ST"),
+    # CPU / memory.
+    ("RAM tests",                             "diag_ram",       "RAM"),
+    ("L2 Cache",                              "diag_l2cache",   "L2CACHE"),
+    # Host bridges / VME.
+    ("Raven host bridge",                     "diag_raven",     "RAVEN"),
+    ("Falcon memory controller",              "diag_falcon",    "FALCON"),
+    ("VME2Chip2",                             "diag_vme2",      "VME2"),
+    ("VME3 / Universe-II",                    "diag_vme3",      "VME3"),
+    ("PCI / PMC generic",                     "diag_pcibus",    "PCIBUS"),
+    ("ISA bridge",                            "diag_isabridge", "ISABRDGE"),
+    # Storage / network.
+    ("EIDE",                                  "diag_eide",      "EIDE"),
+    ("NCR 53C8XX SCSI",                       "diag_ncr",       "NCR"),
+    ("Ethernet controller (DEC21x4x)",        "diag_dec",       "DEC"),
+    # I/O.
+    ("Serial I/O (UART)",                     "diag_uart",      "UART"),
+    ("Serial controller (Z85C230 SCC)",       "diag_scc",       "SCC"),
+    ("Parallel interface (CL1283)",           "diag_cl1283",    "CL1283"),
+    ("Parallel interface (PC8730x)",          "diag_par8730x",  "PAR8730X"),
+    ("Keyboard/Mouse (8730x)",                "diag_kbd",       "KBD8730X"),
+    ("Z8536 counter/timer I/O",               "diag_z8536",     "Z8536"),
+    # Misc.
+    ("Real-time clock (MK48Txx)",             "diag_rtc",       "RTC"),
+    ("VGA controller (GD54XX)",               "diag_vga",       "VGA54XX"),
+    # Display-only command; safe to leave checked, just prints errors
+    # collected during the preceding tests.
+    ("Display errors after run",              "diag_de",        "DE"),
 )
 
 
