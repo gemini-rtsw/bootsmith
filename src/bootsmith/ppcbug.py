@@ -171,20 +171,24 @@ ENV_FIELDS: tuple[tuple[str, str], ...] = (
 # still walks all of ENV under the hood; this is just the schema for the
 # edit form.
 ENV_USER_EDITABLE_KEYS: tuple[str, ...] = (
-    # Network PReP-Boot Mode Enable: Gemini sets Y, default is N.
+    # Boot behaviour. Gemini sets PReP + SYSFAIL to Y (defaults N);
+    # leaves all autoboots at N because IOCs are booted manually.
     "env_prep_boot",
-    # Negate VMEbus SYSFAIL* Always: Gemini sets Y, default is N.
     "env_negate_sysfail",
     "env_auto_boot_enable",
     "env_auto_boot_powerup_only",
     "env_net_auto_boot_enable",
     "env_net_auto_boot_powerup_only",
-    # PCI Slave Image 1 + 2 map decoders. On a healthy MVME2700 these
-    # are all 00000000 (decoder disabled). Boards that come back from
-    # a battery swap or a bad NVRAM push sometimes have stale C0xxxxxx
-    # values here, which lights up phantom Universe-II windows and
-    # crashes RTEMS bus enumeration. Image 0 + Image 3 are left alone
-    # (slave 3 is the VME CSR window, slave 0 is unused on our boards).
+    # Memory geometry. Ending Address must match physical DIMM size
+    # (04000000=64MB, 08000000=128MB, 10000000=256MB). DRAM speed
+    # varies by DIMM type (50 vs 60 ns).
+    "env_mem_size_end",
+    "env_dram_speed",
+    # PCI Slave Image map decoders (Universe-II inbound windows).
+    # Healthy MVME2700 has slave 0/1/2 all zero (disabled) and slave
+    # 3 set to the VME CSR window (C0400000/2FFF0000/30000000/D0000000).
+    # Boards that lose battery come back with stale C0xxxxxx values in
+    # slaves 1 and 2 that crash RTEMS bus enumeration.
     "env_pci_slave_1_ctrl",
     "env_pci_slave_1_base",
     "env_pci_slave_1_bound",
@@ -193,6 +197,23 @@ ENV_USER_EDITABLE_KEYS: tuple[str, ...] = (
     "env_pci_slave_2_base",
     "env_pci_slave_2_bound",
     "env_pci_slave_2_xlate",
+    "env_pci_slave_3_ctrl",
+    "env_pci_slave_3_base",
+    "env_pci_slave_3_bound",
+    "env_pci_slave_3_xlate",
+    # VMEbus Slave Image 0 (A32 inbound window from VME to local RAM).
+    # Bound must match physical memory size; Gemini uses
+    # ctrl=E0F20000, base=00000000, bound=<mem size>, xlate=80000000.
+    "env_vme_slave_0_ctrl",
+    "env_vme_slave_0_base",
+    "env_vme_slave_0_bound",
+    "env_vme_slave_0_xlate",
+    # VME3PCI / Universe-II top-level config. Working board:
+    # master=Y, misc=10000000, master_ctrl=80C00000, misc_ctrl=52060000.
+    "env_vme3pci_master",
+    "env_pci_misc",
+    "env_master_ctrl",
+    "env_misc_ctrl",
 )
 
 # UI-visible schema = NIOT fields + the subset of ENV the user edits.
