@@ -638,20 +638,23 @@ def create_app() -> Flask:
 
         current: dict[str, str] = {}
         read_error = ""
-        if ws.state == "at_prompt":
-            lock: threading.Lock = app.config["push_lock"]
-            if lock.acquire(blocking=False):
-                try:
-                    result = ppcbug_mod.read_cnfg(sess.transport)
-                    current = result.params
-                except Exception as e:
-                    read_error = str(e)
-                finally:
-                    lock.release()
-            else:
-                read_error = "another operation is running; current values not read"
+        lock: threading.Lock = app.config["push_lock"]
+        if lock.acquire(blocking=False):
+            try:
+                result = ppcbug_mod.read_cnfg(sess.transport)
+                current = result.params
+                if not current:
+                    read_error = (
+                        f"CNFG returned no parsable fields "
+                        f"(buffer was {len(result.raw)} bytes; "
+                        f"check the terminal -- the board may not be at PPC1-Bug>)"
+                    )
+            except Exception as e:
+                read_error = str(e)
+            finally:
+                lock.release()
         else:
-            read_error = f"board not at a prompt (state={ws.state}); current values not read"
+            read_error = "another operation is running; current values not read"
 
         return render_template(
             "_params_cnfg.html",

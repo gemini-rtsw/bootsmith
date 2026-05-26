@@ -343,7 +343,7 @@ def write_params(
     )
 
 
-def read_cnfg(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
+def read_cnfg(transport: WTITransport, timeout: float = 12.0) -> ReadResult:
     """Run `CNFG` (read-only) and parse the 10 VPD fields.
 
     `CNFG` (no `;M`) just dumps the Board Information Block without
@@ -356,12 +356,6 @@ def read_cnfg(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
     Returns ReadResult.params keyed by CNFG_FIELDS keys; the values
     are stripped of surrounding quotes and trailing spaces.
     """
-    try:
-        transport.write(b"\r")
-    except Exception:
-        pass
-    time.sleep(0.1)
-
     q = transport.subscribe(seed_history=False)
     raw_buf = bytearray()
     params: dict[str, str] = {}
@@ -372,27 +366,53 @@ def read_cnfg(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
             raw_buf.extend(q.popleft())
 
     try:
-        transport.write(b"CNFG\r")
+        # Send a bare CR so the board's current prompt-echo is flushed
+        # into OUR subscriber queue (we subscribed before, so we see
+        # everything from now on). Then send CNFG.
+        try:
+            transport.write(b"\r")
+        except Exception:
+            pass
+        time.sleep(0.2)
+        # Drain whatever the bare-CR triggered before we even send
+        # CNFG, so the PROMPT_RE tail-match below can't fire on the
+        # *pre-CNFG* prompt.
+        drain()
+        prefix_len = len(raw_buf)
+        try:
+            transport.write(b"CNFG\r")
+        except Exception as e:
+            _log(f"read_cnfg: write CNFG failed: {e}")
+            return ReadResult(params={}, raw=bytes(raw_buf))
+
         deadline = time.time() + timeout
-        # Wait for the dialogue to print all lines and return to PPC1-Bug>.
-        # CNFG is non-interactive so we just wait for the closing prompt.
+        # Wait for CNFG output + closing PPC1-Bug>. CNFG is non-
+        # interactive so we just wait for the closing prompt to appear
+        # AFTER prefix_len (so we don't trip on the pre-CNFG prompt
+        # that may have been re-echoed by the bare CR).
         last_change = time.time()
-        last_len = 0
+        last_len = len(raw_buf)
+        saw_data = False
         while time.time() < deadline:
             drain()
             if len(raw_buf) != last_len:
                 last_len = len(raw_buf)
                 last_change = time.time()
-            if PROMPT_RE.search(bytes(raw_buf[-200:])):
-                # Allow ~0.2s of quiet first so any straggler bytes
-                # arrive before we parse.
-                if time.time() - last_change > 0.2:
+                saw_data = True
+            # Only check the prompt against bytes added AFTER prefix_len.
+            tail = bytes(raw_buf[max(prefix_len, len(raw_buf) - 400):])
+            if saw_data and PROMPT_RE.search(tail):
+                if time.time() - last_change > 0.3:
                     break
             time.sleep(0.05)
         else:
-            _log(f"read_cnfg: timed out after {timeout}s; parsing what we have")
+            _log(
+                f"read_cnfg: timed out after {timeout}s; "
+                f"buf_len={len(raw_buf)} saw_data={saw_data}"
+            )
 
-        text = bytes(raw_buf).decode(errors="replace")
+        # Parse only the data appended after the pre-CNFG prefix.
+        text = bytes(raw_buf[prefix_len:]).decode(errors="replace")
         for line in text.splitlines():
             if "=" not in line:
                 continue
@@ -411,7 +431,16 @@ def read_cnfg(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
             value = value.rstrip()
             params[key] = value
 
-        _log(f"read_cnfg: parsed {len(params)}/{len(CNFG_FIELDS)} fields")
+        if len(params) < len(CNFG_FIELDS):
+            # Dump a small head/tail sample so a partial read is debuggable.
+            sample = text[:400].replace("\r", "\\r").replace("\n", "\\n")
+            _log(
+                f"read_cnfg: parsed {len(params)}/{len(CNFG_FIELDS)} fields; "
+                f"buf_len={len(raw_buf)} prefix_len={prefix_len}; "
+                f"sample={sample!r}"
+            )
+        else:
+            _log(f"read_cnfg: parsed {len(params)}/{len(CNFG_FIELDS)} fields")
     finally:
         transport.unsubscribe(q)
 
