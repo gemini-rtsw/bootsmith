@@ -179,6 +179,20 @@ ENV_USER_EDITABLE_KEYS: tuple[str, ...] = (
     "env_auto_boot_powerup_only",
     "env_net_auto_boot_enable",
     "env_net_auto_boot_powerup_only",
+    # PCI Slave Image 1 + 2 map decoders. On a healthy MVME2700 these
+    # are all 00000000 (decoder disabled). Boards that come back from
+    # a battery swap or a bad NVRAM push sometimes have stale C0xxxxxx
+    # values here, which lights up phantom Universe-II windows and
+    # crashes RTEMS bus enumeration. Image 0 + Image 3 are left alone
+    # (slave 3 is the VME CSR window, slave 0 is unused on our boards).
+    "env_pci_slave_1_ctrl",
+    "env_pci_slave_1_base",
+    "env_pci_slave_1_bound",
+    "env_pci_slave_1_xlate",
+    "env_pci_slave_2_ctrl",
+    "env_pci_slave_2_base",
+    "env_pci_slave_2_bound",
+    "env_pci_slave_2_xlate",
 )
 
 # UI-visible schema = NIOT fields + the subset of ENV the user edits.
