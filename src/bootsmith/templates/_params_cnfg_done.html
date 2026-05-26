@@ -1,0 +1,5 @@
+{% include "_params_actions.html" %}
+<h3>VPD write finished on {{ profile.name }}</h3>
+<p class="ok">Wrote {{ fields_written|length }} field(s) via <code>CNFG;M</code>.</p>
+<p class="hint">Run <code>CNFG</code> at the PPC1-Bug&gt; prompt in the terminal above to confirm the new
+values stick and the checksum error is gone. Then reboot the board.</p>

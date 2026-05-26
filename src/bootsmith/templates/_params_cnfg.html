@@ -1,0 +1,90 @@
+{# CNFG (Board Information Block / VPD) one-shot repair form.
+   Values are NOT saved to the profile -- they're board-specific and
+   typed once from the sticker on the board. #}
+{% include "_params_actions.html" %}
+<h3>Repair Board Information Block (VPD) on {{ profile.name }}</h3>
+
+<div class="hint" style="border-left:3px solid var(--accent);padding:0.5em 0.75em;background:#0e131a;margin:0.5em 0;">
+  <p><strong>One-shot operation.</strong> This writes the board's VPD EEPROM
+  (the data shown by <code>CNFG</code>). Only run this when <code>CNFG</code>
+  on the board prints "Board Information Block Checksum Error" or shows
+  garbage like <code>UUUUUU</code> / <code>??????</code> — usually after a
+  dead backup battery.</p>
+
+  <p>Values are <strong>per-board</strong> and <strong>not saved</strong> in
+  the profile. Most fields you can fake; the only one that matters is the
+  <strong>Ethernet Address (MAC)</strong>, which must be unique and match
+  the sticker on the board.</p>
+</div>
+
+<form hx-post="/params/cnfg/run" hx-target="#params" hx-swap="innerHTML">
+  <div class="controls">
+    <button type="submit" class="primary">Write VPD</button>
+  </div>
+
+  <div class="grid params-grid">
+    <label>
+      <span class="field-label">Board (PWA) Serial Number</span>
+      <input name="vpd_cnfg_board_sn" autocomplete="off" spellcheck="false" placeholder="e.g. 5195622">
+      <small class="hint">From the white sticker on the board. Any non-empty string is fine — RTEMS doesn't read this.</small>
+    </label>
+
+    <label>
+      <span class="field-label">Board Identifier</span>
+      <input name="vpd_cnfg_board_id" autocomplete="off" spellcheck="false" value="MVME2700">
+      <small class="hint">Board model. <code>MVME2700</code> is safe for our boards.</small>
+    </label>
+
+    <label>
+      <span class="field-label">Artwork (PWA) Identifier</span>
+      <input name="vpd_cnfg_artwork_id" autocomplete="off" spellcheck="false" value="MVME2700">
+      <small class="hint">PCB artwork ID. Reuse Board Identifier — not read by RTEMS.</small>
+    </label>
+
+    <label>
+      <span class="field-label">MPU Clock Speed</span>
+      <input name="vpd_cnfg_mpu_clock" autocomplete="off" spellcheck="false" value="267">
+      <small class="hint">From the boot banner ("MPU Clock Speed =267Mhz"). Type just the number, e.g. <code>267</code>.</small>
+    </label>
+
+    <label>
+      <span class="field-label">BUS Clock Speed</span>
+      <input name="vpd_cnfg_bus_clock" autocomplete="off" spellcheck="false" value="67">
+      <small class="hint">From the boot banner ("BUS Clock Speed =67Mhz"). Just the number, e.g. <code>67</code>.</small>
+    </label>
+
+    <label>
+      <span class="field-label">Ethernet Address (MAC) — REQUIRED</span>
+      <input name="vpd_cnfg_mac" autocomplete="off" spellcheck="false" placeholder="e.g. 08003E2E8946" pattern="[0-9A-Fa-f]{12}" title="12 hex digits, no separators">
+      <small class="hint"><strong>Critical.</strong> 12 hex digits, no colons. From the MAC sticker on the board (often starts with <code>08003E</code>). Must be unique.</small>
+    </label>
+
+    <label>
+      <span class="field-label">Primary SCSI Identifier</span>
+      <input name="vpd_cnfg_scsi_id" autocomplete="off" spellcheck="false" value="07">
+      <small class="hint">Always <code>07</code>.</small>
+    </label>
+
+    <label>
+      <span class="field-label">System Serial Number</span>
+      <input name="vpd_cnfg_system_sn" autocomplete="off" spellcheck="false" placeholder="reuse Board Serial Number">
+      <small class="hint">Reuse the board SN, or anything non-empty. Not read by RTEMS.</small>
+    </label>
+
+    <label>
+      <span class="field-label">System Identifier</span>
+      <input name="vpd_cnfg_system_id" autocomplete="off" spellcheck="false" placeholder="reuse Board Serial Number">
+      <small class="hint">Anything non-empty. Not read by RTEMS.</small>
+    </label>
+
+    <label>
+      <span class="field-label">License Identifier</span>
+      <input name="vpd_cnfg_license_id" autocomplete="off" spellcheck="false" value="0">
+      <small class="hint">Anything non-empty. Not read by RTEMS.</small>
+    </label>
+  </div>
+
+  <div class="controls">
+    <button type="submit" class="primary">Write VPD</button>
+  </div>
+</form>

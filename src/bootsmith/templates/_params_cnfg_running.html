@@ -1,0 +1,10 @@
+{% include "_params_actions.html" %}
+<h3>Writing VPD on {{ profile.name }}…</h3>
+<p class="hint">Walking the <code>CNFG;M</code> dialogue. Watch the terminal for live progress.
+This panel will update when the write finishes (usually ~5-10s).</p>
+
+<div hx-get="/params/cnfg/status"
+     hx-trigger="load delay:1s"
+     hx-target="#params"
+     hx-swap="innerHTML">
+</div>

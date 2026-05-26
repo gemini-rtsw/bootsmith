@@ -240,6 +240,26 @@ DIAG_COMMANDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# CNFG (board information block) fields, in the order PPCBug prompts
+# them under `CNFG;M`. Labels match exactly what the board prints
+# before the `=`. Used for one-shot VPD repair after the backup
+# battery dies and the VPD EEPROM goes blank. These values are NOT
+# saved in the profile -- the user types them once from the sticker
+# on the board.
+CNFG_FIELDS: tuple[tuple[str, str], ...] = (
+    ("Board (PWA) Serial Number", "cnfg_board_sn"),
+    ("Board Identifier",          "cnfg_board_id"),
+    ("Artwork (PWA) Identifier",  "cnfg_artwork_id"),
+    ("MPU Clock Speed",           "cnfg_mpu_clock"),
+    ("BUS Clock Speed",           "cnfg_bus_clock"),
+    ("Ethernet Address",          "cnfg_mac"),
+    ("Primary SCSI Identifier",   "cnfg_scsi_id"),
+    ("System Serial Number",      "cnfg_system_sn"),
+    ("System Identifier",         "cnfg_system_id"),
+    ("License Identifier",        "cnfg_license_id"),
+)
+
+
 PROMPT_RE = re.compile(rb"PPC[0-9](?:-Bug)?>\s*\Z")
 DIAG_PROMPT_RE = re.compile(rb"PPC[0-9]-Diag>\s*\Z")
 
@@ -321,6 +341,43 @@ def write_params(
         raw=niot.raw + env.raw,
         fields_written=niot.fields_written + env.fields_written,
     )
+
+
+def write_cnfg(
+    transport: WTITransport,
+    values: dict[str, str],
+    timeout: float = 8.0,
+) -> WriteResult:
+    """Walk `CNFG;M` once, typing the supplied values into the VPD.
+
+    Same dialogue shape as NIOT/ENV — `LABEL =VALUE?` per field,
+    Enter = keep current, type new value + CR = set. After the last
+    field PPCBug prints "Update Non-Volatile RAM (Y/N)?" which the
+    shared `_walk` answers Y to automatically.
+
+    One-shot operation: values are NOT stored anywhere; the caller is
+    expected to assemble them from a per-board form and discard after
+    the write.
+    """
+    return _cnfg_walk(transport, values, timeout)
+
+
+def _cnfg_walk(
+    transport: WTITransport,
+    values: dict[str, str],
+    timeout: float,
+) -> WriteResult:
+    """Same as the generic _walk, but issues `CNFG;M` and walks the
+    CNFG_FIELDS list to the natural end."""
+    result = _walk(
+        transport,
+        "CNFG;M",
+        CNFG_FIELDS,
+        values=values,
+        timeout=timeout,
+        stop_after_last_of=None,
+    )
+    return WriteResult(raw=result.raw, fields_written=result.fields_written)
 
 
 def boot(transport: WTITransport) -> None:

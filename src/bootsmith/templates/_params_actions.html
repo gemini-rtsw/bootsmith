@@ -15,6 +15,9 @@
     <form hx-post="/params/diag" hx-target="#params" hx-swap="innerHTML" class="inline">
       <button type="submit">Diag</button>
     </form>
+    <form hx-get="/params/cnfg" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" title="One-shot VPD repair (CNFG;M) for boards with a corrupt Board Information Block">CNFG</button>
+    </form>
   {% endif %}
   <form hx-get="/params/edit" hx-target="#params" hx-swap="innerHTML" class="inline">
     <button type="submit">Edit</button>

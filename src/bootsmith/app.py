@@ -58,6 +58,16 @@ def create_app() -> Flask:
         "error": "",
     }
     app.config["push_job_lock"] = threading.Lock()
+    # Same single-slot pattern for the one-shot CNFG;M VPD repair.
+    app.config["cnfg_job"] = {
+        "id": 0,
+        "state": "idle",        # idle | running | done | error
+        "started_at": 0.0,
+        "finished_at": 0.0,
+        "done_html": "",
+        "error": "",
+    }
+    app.config["cnfg_job_lock"] = threading.Lock()
     sock = Sock(app)
 
     @app.get("/")
@@ -608,6 +618,106 @@ def create_app() -> Flask:
         t = threading.Thread(target=_runner, daemon=True, name="diag")
         t.start()
         return render_template("_params_diag.html", profile=profile, enabled=sorted(enabled))
+
+    @app.get("/params/cnfg")
+    def params_cnfg_form():
+        """Show the one-shot VPD repair form (CNFG;M)."""
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        loader = sess.watcher.status().loader or sess.profile.loader_hint
+        if loader != "ppcbug":
+            return _error(f"CNFG only supported on PPCBug (loader={loader!r})"), 400
+        return render_template("_params_cnfg.html", profile=sess.profile)
+
+    @app.post("/params/cnfg/run")
+    def params_cnfg_run():
+        """Kick off `CNFG;M` in a background thread. Values come from the
+        form and are NOT saved to the profile -- VPD is per-board."""
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        ws = sess.watcher.status()
+        if ws.state != "at_prompt":
+            return _error(f"not at a loader prompt (state={ws.state})"), 409
+        loader = ws.loader or sess.profile.loader_hint
+        if loader != "ppcbug":
+            return _error(f"CNFG only supported on PPCBug (loader={loader!r})"), 400
+
+        # Collect vpd_<key> form fields. Empty values mean "keep current".
+        values: dict[str, str] = {}
+        for _label, key in ppcbug_mod.CNFG_FIELDS:
+            v = (request.form.get(f"vpd_{key}") or "").strip()
+            if v:
+                values[key] = v
+        if not values:
+            return _error("nothing to write; fill in at least one field"), 400
+
+        lock: threading.Lock = app.config["push_lock"]
+        if not lock.acquire(blocking=False):
+            return _error("another push is already in progress"), 409
+        transport = sess.transport
+        profile = sess.profile
+
+        job = app.config["cnfg_job"]
+        job_lock: threading.Lock = app.config["cnfg_job_lock"]
+        with job_lock:
+            job["id"] += 1
+            job["state"] = "running"
+            job["started_at"] = time.time()
+            job["finished_at"] = 0.0
+            job["done_html"] = ""
+            job["error"] = ""
+
+        def _runner():
+            try:
+                result = ppcbug_mod.write_cnfg(transport, values)
+                with app.app_context():
+                    html = render_template(
+                        "_params_cnfg_done.html",
+                        profile=profile,
+                        fields_written=result.fields_written,
+                    )
+                with job_lock:
+                    job["state"] = "done"
+                    job["done_html"] = html
+                    job["finished_at"] = time.time()
+            except Exception as e:
+                with job_lock:
+                    job["state"] = "error"
+                    job["error"] = str(e)
+                    job["finished_at"] = time.time()
+            finally:
+                lock.release()
+
+        t = threading.Thread(target=_runner, daemon=True, name=f"cnfg-{job['id']}")
+        t.start()
+        return render_template("_params_cnfg_running.html", profile=profile)
+
+    @app.get("/params/cnfg/status")
+    def params_cnfg_status():
+        job = app.config["cnfg_job"]
+        job_lock: threading.Lock = app.config["cnfg_job_lock"]
+        with job_lock:
+            state = job["state"]
+            html = job["done_html"]
+            err = job["error"]
+        if state == "done":
+            return html
+        if state == "error":
+            sess = app.config["sessions"].current()
+            return f'<div class="error">CNFG;M failed: {err}</div>' + render_template(
+                "_params_actions.html",
+                profile=(sess.profile if sess else None),
+            )
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        return render_template(
+            "_params_cnfg_running.html",
+            profile=(sess.profile if sess else None),
+        )
 
     @app.post("/params/boot")
     def params_boot():
