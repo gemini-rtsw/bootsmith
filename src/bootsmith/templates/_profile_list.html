@@ -64,9 +64,6 @@
               {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
               {{ diag_command_fields(p.loader_hint, diag_commands_schema, p.diag_commands or []) }}
             </div>
-            <div class="row">
-              <button type="submit" class="primary">Save</button>
-            </div>
           </form>
         </li>
       {% endfor %}
