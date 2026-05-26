@@ -34,7 +34,6 @@ def _render_profile_list():
         profiles=profiles_mod.list_profiles(),
         schemas=schemas_mod.SCHEMAS,
         loader_labels=schemas_mod.LOADER_LABELS,
-        diag_commands_schema=ppcbug_mod.DIAG_COMMANDS,
     )
 
 
@@ -77,7 +76,6 @@ def create_app() -> Flask:
             profiles=profiles_mod.list_profiles(),
             schemas=schemas_mod.SCHEMAS,
             loader_labels=schemas_mod.LOADER_LABELS,
-            diag_commands_schema=ppcbug_mod.DIAG_COMMANDS,
         )
 
     @app.get("/profiles")
@@ -143,22 +141,6 @@ def create_app() -> Flask:
         has_param_fields = any(k.startswith("param_") for k in request.form.keys())
         if has_param_fields or loader_changed:
             existing.boot_params = new_params
-
-        # Diag commands: collect any diag_* checkboxes for PPCBug. The
-        # form posts diag_<key>=1 for each checked box; absent boxes
-        # mean unchecked. Only update if the form actually rendered the
-        # diag section (any diag_ key present) OR loader changed.
-        has_diag_fields = any(k.startswith("diag_") for k in request.form.keys())
-        if has_diag_fields or loader_changed:
-            if loader_hint == "ppcbug":
-                valid = {key for _label, key, _cmd in ppcbug_mod.DIAG_COMMANDS}
-                checked = [
-                    k[len("diag_"):] for k in request.form.keys()
-                    if k.startswith("diag_") and k[len("diag_"):] in valid
-                ]
-                existing.diag_commands = sorted(checked)
-            else:
-                existing.diag_commands = []
 
         # Handle rename if a new_name was submitted and it differs.
         new_name = (request.form.get("new_name") or "").strip()
@@ -438,14 +420,10 @@ def create_app() -> Flask:
         profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
         sess.profile = profile
         fields = schemas_mod.fields_for(profile.loader_hint)
-        diag_commands = (
-            ppcbug_mod.DIAG_COMMANDS if profile.loader_hint == "ppcbug" else ()
-        )
         return render_template(
             "_params_edit.html",
             profile=profile,
             fields=fields,
-            diag_commands=diag_commands,
         )
 
     @app.post("/params/push")
@@ -583,12 +561,29 @@ def create_app() -> Flask:
             profile=(sess.profile if sess else None),
         )
 
+    @app.get("/params/diag")
+    def params_diag_form():
+        """Show the diag-command picker dialog."""
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        loader = sess.watcher.status().loader or sess.profile.loader_hint
+        if loader != "ppcbug":
+            return _error(f"diag only supported on PPCBug (loader={loader!r})"), 400
+        return render_template(
+            "_params_diag_form.html",
+            profile=sess.profile,
+            diag_commands=ppcbug_mod.DIAG_COMMANDS,
+        )
+
     @app.post("/params/diag")
     def params_diag():
-        """Run the saved profile's enabled diag commands.
+        """Run the diag commands selected in the form.
 
-        Sends SD -> each enabled diag command -> RESET. Returns a small
-        status panel; output is visible in the live terminal.
+        Reads diag_<key>=1 form fields (no profile persistence).
+        Sends SD -> each selected command -> SD. Output is live in the
+        terminal; this route returns a small status panel.
         """
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
@@ -597,9 +592,13 @@ def create_app() -> Flask:
         loader = sess.watcher.status().loader or sess.profile.loader_hint
         if loader != "ppcbug":
             return _error(f"diag only supported on PPCBug (loader={loader!r})"), 400
-        enabled = set(sess.profile.diag_commands or [])
+        valid = {key for _label, key, _cmd in ppcbug_mod.DIAG_COMMANDS}
+        enabled = {
+            k[len("diag_"):] for k in request.form.keys()
+            if k.startswith("diag_") and k[len("diag_"):] in valid
+        }
         if not enabled:
-            return _error("no diag commands selected in profile (edit profile to enable some)"), 400
+            return _error("no diag commands selected; tick at least one box"), 400
 
         lock: threading.Lock = app.config["push_lock"]
         if not lock.acquire(blocking=False):

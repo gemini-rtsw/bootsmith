@@ -1,0 +1,26 @@
+{# Diag-command picker. Lives in its own dialog (no persistence) --
+   user ticks the boxes they want, clicks Run, the runner walks PPC1-Diag>
+   for the selected commands. Not stored anywhere. #}
+{% include "_params_actions.html" %}
+<h3>Run diagnostics on {{ profile.name }}</h3>
+
+<form hx-post="/params/diag" hx-target="#params" hx-swap="innerHTML">
+  <div class="controls">
+    <button type="submit" class="primary">Run diag</button>
+  </div>
+
+  <p class="hint">
+    Sends <code>SD</code> to enter PPC1-Diag&gt;, runs each selected command
+    in order, then <code>SD</code> again to return to PPC1-Bug&gt;. Output
+    appears live in the terminal above. Selections are not saved.
+  </p>
+
+  <div class="diag-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 12px;margin:4px 0 8px;">
+    {% for label, key, cmd in diag_commands %}
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;line-height:1.3;margin:0;padding:1px 0;">
+        <input type="checkbox" name="diag_{{ key }}" value="1" style="margin:0;">
+        <span><code>{{ cmd }}</code> &mdash; {{ label.split(' (')[0] }}</span>
+      </label>
+    {% endfor %}
+  </div>
+</form>

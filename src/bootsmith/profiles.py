@@ -45,10 +45,6 @@ class Profile:
     prompts: dict = field(default_factory=dict)
     banners: dict = field(default_factory=dict)
     boot_params: dict = field(default_factory=dict)
-    # Sorted list of diag-command keys (from ppcbug.DIAG_COMMANDS) to run
-    # when the user clicks the Diag button. Stored as a list for JSON
-    # friendliness; semantically a set.
-    diag_commands: list = field(default_factory=list)
     notes: str = ""
 
 
@@ -133,7 +129,6 @@ def _load_path(path: Path) -> Profile:
         prompts=data.get("prompts", {}),
         banners=data.get("banners", {}),
         boot_params=boot_params,
-        diag_commands=list(data.get("diag_commands", [])),
         notes=data.get("notes", ""),
     )
 

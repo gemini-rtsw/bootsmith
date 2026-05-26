@@ -12,8 +12,8 @@
     <button type="submit" class="primary">{{ boot_label }}</button>
   </form>
   {% if loader == "ppcbug" %}
-    <form hx-post="/params/diag" hx-target="#params" hx-swap="innerHTML" class="inline">
-      <button type="submit">Diag</button>
+    <form hx-get="/params/diag" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" title="Open the diag picker, choose which PPC1-Diag commands to run">Diag</button>
     </form>
     <form hx-get="/params/cnfg" hx-target="#params" hx-swap="innerHTML" class="inline">
       <button type="submit" title="One-shot VPD repair (CNFG;M) for boards with a corrupt Board Information Block">CNFG</button>

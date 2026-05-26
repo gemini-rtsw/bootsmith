@@ -19,21 +19,3 @@
 <p class="hint">No boot-param fields for loader {{ loader }} yet.</p>
 {% endif %}
 {% endmacro %}
-
-{# Macro: render PPCBug diag-command checkboxes. No-op for other loaders. #}
-{% macro diag_command_fields(loader, diag_commands, enabled_keys) %}
-{% if loader == "ppcbug" and diag_commands %}
-  <h4>Diag commands</h4>
-  <p class="hint">Selected commands run in order (after <code>SD</code>) when you click Diag, then <code>SD</code> again to return to PPC1-Bug&gt;.</p>
-  <div class="diag-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 12px;margin:4px 0 8px;">
-    {% for label, key, cmd in diag_commands %}
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;line-height:1.3;margin:0;padding:1px 0;">
-        <input type="checkbox" name="diag_{{ key }}" value="1"
-               {% if key in enabled_keys %}checked{% endif %}
-               style="margin:0;">
-        <span><code>{{ cmd }}</code> &mdash; {{ label.split(' (')[0] }}</span>
-      </label>
-    {% endfor %}
-  </div>
-{% endif %}
-{% endmacro %}
