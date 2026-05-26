@@ -1,9 +1,13 @@
 {% from "_profile_form_fields.html" import boot_param_fields, diag_command_fields %}
+{% include "_params_actions.html" %}
 <h3>Edit boot params for {{ profile.name }}</h3>
 <form hx-post="/profiles/{{ profile.name }}/update"
       hx-target="#params"
       hx-swap="innerHTML"
       hx-headers='{"X-Return": "params"}'>
+  <div class="controls">
+    <button type="submit" class="primary">Save</button>
+  </div>
   {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
   {{ diag_command_fields(profile.loader_hint, diag_commands, profile.diag_commands or []) }}
 
@@ -11,4 +15,3 @@
     <button type="submit" class="primary">Save</button>
   </div>
 </form>
-{% include "_params_actions.html" %}
