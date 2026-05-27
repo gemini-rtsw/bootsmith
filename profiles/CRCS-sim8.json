@@ -3,17 +3,12 @@
   "boot_params": {
     "argument_file_name": "/gem_prod/epics/ioc/crcs_mk/stcrcs",
     "boot_file_name": "/gem_prod/epics/ioc/crcs_mk/crcs.boot",
-    "bootp_reply_update": "y",
-    "bootp_request_control": "a",
     "client_ip": "10.2.2.108",
-    "env_auto_boot_enable": "y",
-    "env_auto_boot_powerup_only": "y",
-    "env_net_auto_boot_enable": "y",
-    "env_net_auto_boot_powerup_only": "y",
     "gateway_ip": "10.2.2.1",
     "server_ip": "10.2.71.30",
     "subnet_mask": "255.255.255.0"
   },
+  "diag_commands": [],
   "loader_hint": "ppcbug",
   "name": "CRCS-sim8",
   "notes": "",
