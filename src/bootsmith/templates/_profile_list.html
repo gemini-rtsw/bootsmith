@@ -51,8 +51,10 @@
                 <button type="submit" class="primary">Save</button>
                 {{ saved_badge("connection") }}
                 <button type="button"
+                        aria-label="Close"
+                        title="Close"
                         style="margin-left:auto;"
-                        onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">Close</button>
+                        onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">&times;</button>
               </div>
               <div class="grid">
                 <label>Name <input name="new_name" required value="{{ p.name }}"
