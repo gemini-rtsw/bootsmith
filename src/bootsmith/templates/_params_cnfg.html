@@ -55,6 +55,8 @@
 <form hx-post="/params/cnfg/run" hx-target="#params" hx-swap="innerHTML">
   <div class="controls">
     <button type="submit" class="primary">Write VPD</button>
+    <button type="button"
+            hx-get="/params" hx-target="#params" hx-swap="innerHTML">Cancel</button>
   </div>
 
   <div class="grid params-grid">
