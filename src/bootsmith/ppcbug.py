@@ -219,11 +219,11 @@ ENV_USER_EDITABLE_KEYS: tuple[str, ...] = (
 # UI-visible per-dialogue schemas. The connected-mode UI shows NIOT
 # and ENV as separate dialogs (one button each in the action bar);
 # the home-screen profile editor still uses the combined FIELDS tuple
-# so all saved boot_params land in one place.
+# so all saved boot_params land in one place. ENV exposes all ~85
+# fields now; ENV_USER_EDITABLE_KEYS is still used as a "read cutoff"
+# hint by callers that want a fast partial read.
 NIOT_USER_FIELDS: tuple[tuple[str, str], ...] = NIOT_FIELDS
-ENV_USER_FIELDS: tuple[tuple[str, str], ...] = tuple(
-    (label, key) for label, key in ENV_FIELDS if key in ENV_USER_EDITABLE_KEYS
-)
+ENV_USER_FIELDS: tuple[tuple[str, str], ...] = ENV_FIELDS
 FIELDS: tuple[tuple[str, str], ...] = NIOT_USER_FIELDS + ENV_USER_FIELDS
 
 
@@ -334,11 +334,12 @@ def write_niot(
 
 
 def read_env(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
-    """Walk ENV pressing only Enter; capture the user-editable subset.
+    """Walk ENV pressing only Enter; capture every field.
 
-    ENV has ~85 fields; we abort with `.` after the last user-editable
-    field, because reading the full thing wastes ~30s of round-trips
-    on stuff we don't display.
+    ENV has ~85 fields and walks them all -- ~30s round-trip -- so the
+    edit form can pre-fill every prompt with the current value. (The
+    old fast partial read stopped after the last 'interesting' field
+    and left the rest blank in the UI.)
     """
     try:
         transport.write(b"\r")
@@ -346,7 +347,7 @@ def read_env(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
         pass
     time.sleep(0.1)
     r = _walk(transport, "ENV", ENV_FIELDS, values={}, timeout=timeout,
-              stop_after_last_of=set(ENV_USER_EDITABLE_KEYS))
+              stop_after_last_of=None)
     return ReadResult(params=r.params, raw=r.raw)
 
 
