@@ -50,6 +50,9 @@
               <div class="row" style="margin-bottom:8px;">
                 <button type="submit" class="primary">Save</button>
                 {{ saved_badge("connection") }}
+                <button type="button"
+                        style="margin-left:auto;"
+                        onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">Close</button>
               </div>
               <div class="grid">
                 <label>Name <input name="new_name" required value="{{ p.name }}"
