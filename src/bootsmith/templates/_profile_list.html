@@ -33,7 +33,13 @@
 {% endif %}{%- endfor %}</pre>
             </details>
           {% endif %}
-          <div id="edit-{{ p.name }}" class="edit-form hidden">
+          {% set is_saved = (saved_profile == p.name) %}
+          {% macro saved_badge(section_name) -%}
+            {%- if is_saved and saved_section == section_name -%}
+              <span class="ok" style="padding:0.25rem 0.5rem;">Saved at {{ saved_at }}</span>
+            {%- endif -%}
+          {%- endmacro %}
+          <div id="edit-{{ p.name }}" class="edit-form{% if not is_saved %} hidden{% endif %}">
             {# Connection (name/host/port/loader). Posts to the existing
                /update endpoint without any param_* fields, so the
                boot_params stay untouched. #}
@@ -43,6 +49,7 @@
               <h4>Connection</h4>
               <div class="row" style="margin-bottom:8px;">
                 <button type="submit" class="primary">Save</button>
+                {{ saved_badge("connection") }}
               </div>
               <div class="grid">
                 <label>Name <input name="new_name" required value="{{ p.name }}"
@@ -71,6 +78,7 @@
                   <h4>NIOT</h4>
                   <div class="row" style="margin-bottom:8px;">
                     <button type="submit" class="primary">Save NIOT</button>
+                    {{ saved_badge("niot") }}
                   </div>
                   {{ boot_param_fields(p.loader_hint, ppcbug_niot_fields, p.boot_params) }}
                 </form>
@@ -80,6 +88,7 @@
                   <h4>ENV</h4>
                   <div class="row" style="margin-bottom:8px;">
                     <button type="submit" class="primary">Save ENV</button>
+                    {{ saved_badge("env") }}
                   </div>
                   {{ boot_param_fields(p.loader_hint, ppcbug_env_fields, p.boot_params) }}
                 </form>
@@ -90,6 +99,7 @@
                   <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
                   <div class="row" style="margin-bottom:8px;">
                     <button type="submit" class="primary">Save</button>
+                    {{ saved_badge("boot params") }}
                   </div>
                   {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
                 </form>

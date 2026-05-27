@@ -28,7 +28,14 @@ def _driver_for(loader: str):
 VALID_LOADERS = set(schemas_mod.LOADER_LABELS.keys())
 
 
-def _render_profile_list():
+def _render_profile_list(saved_profile: str = "", saved_section: str = ""):
+    """Render the home-page profile list.
+
+    Pass saved_profile/saved_section so the just-edited form can
+    show a 'Saved' badge next to its Save button. The edit form for
+    that profile stays open (un-hidden) so the user sees the badge
+    without having to click Edit again.
+    """
     return render_template(
         "_profile_list.html",
         profiles=profiles_mod.list_profiles(),
@@ -36,6 +43,9 @@ def _render_profile_list():
         loader_labels=schemas_mod.LOADER_LABELS,
         ppcbug_niot_fields=ppcbug_mod.NIOT_USER_FIELDS,
         ppcbug_env_fields=ppcbug_mod.ENV_USER_FIELDS,
+        saved_profile=saved_profile,
+        saved_section=saved_section,
+        saved_at=time.strftime("%H:%M:%S") if saved_profile else "",
     )
 
 
@@ -172,7 +182,14 @@ def create_app() -> Flask:
                 profile=existing,
                 fields=fields,
             )
-        return _render_profile_list()
+        # Pick a section name for the Saved badge:
+        #   - "connection" if only connection fields were submitted
+        #     (no param_* keys in the form);
+        #   - "boot params" for VxWorks where everything is one section.
+        saved_section = "connection" if not has_param_fields else "boot params"
+        return _render_profile_list(
+            saved_profile=existing.name, saved_section=saved_section,
+        )
 
     @app.post("/session/open")
     def session_open():
@@ -612,6 +629,7 @@ def create_app() -> Flask:
             fields=fields,
             section=section,
             section_label=section.upper(),
+            saved_at=time.strftime("%H:%M:%S"),
         )
 
     @app.post("/params/save/niot")
@@ -633,8 +651,9 @@ def create_app() -> Flask:
         if section not in ("niot", "env"):
             return _error(f"unknown section {section!r}"), 400
         _ppcbug_section_save_to_profile(profile, section, request.form)
-        # Reflect the updated profile in the home page.
-        return _render_profile_list()
+        # Reflect the updated profile in the home page, with a Saved
+        # badge next to the section's Save button.
+        return _render_profile_list(saved_profile=profile.name, saved_section=section)
 
     @app.post("/params/push")
     def params_push():
