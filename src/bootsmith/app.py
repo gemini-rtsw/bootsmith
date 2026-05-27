@@ -478,6 +478,29 @@ def create_app() -> Flask:
     def params_edit_env():
         return params_edit_section("env")
 
+    def _ppcbug_section_save_to_profile(profile, section: str, form) -> tuple[dict, dict]:
+        """Update profile.boot_params with this section's form fields.
+
+        Returns (new_section_values, merged_boot_params). The OTHER
+        section's saved values are preserved on disk. Empty form
+        fields are treated as "delete this key from the saved set."
+        """
+        fields = _ppcbug_section_fields(section)
+        section_keys = {key for _label, key in fields}
+        new_section_values: dict[str, str] = {}
+        for key in section_keys:
+            v = (form.get(f"param_{key}") or "").strip()
+            if v:
+                new_section_values[key] = v
+        merged = {
+            k: v for k, v in profile.boot_params.items()
+            if k not in section_keys
+        }
+        merged.update(new_section_values)
+        profile.boot_params = merged
+        profiles_mod.save_profile(profile)
+        return new_section_values, merged
+
     def _ppcbug_section_push(section: str):
         """Save form values for one PPCBug section, push, verify."""
         sessions: SessionManager = app.config["sessions"]
@@ -494,24 +517,9 @@ def create_app() -> Flask:
         if not fields:
             return _error(f"unknown section {section!r}"), 400
 
-        # Pull form values only for this section's keys; merge with the
-        # existing saved boot_params (so the OTHER section's saved
-        # values are preserved on disk).
-        section_keys = {key for _label, key in fields}
-        new_section_values: dict[str, str] = {}
-        for key in section_keys:
-            v = (request.form.get(f"param_{key}") or "").strip()
-            if v:
-                new_section_values[key] = v
-        merged = {
-            k: v for k, v in sess.profile.boot_params.items()
-            if k not in section_keys
-        }
-        merged.update(new_section_values)
-
-        # Save to profile so the next form-open shows what was typed.
-        sess.profile.boot_params = merged
-        profiles_mod.save_profile(sess.profile)
+        new_section_values, _merged = _ppcbug_section_save_to_profile(
+            sess.profile, section, request.form
+        )
 
         lock: threading.Lock = app.config["push_lock"]
         if not lock.acquire(blocking=False):
@@ -578,6 +586,55 @@ def create_app() -> Flask:
     @app.post("/params/push/env")
     def params_push_env():
         return _ppcbug_section_push("env")
+
+    def _ppcbug_section_save_only(section: str):
+        """Save form values for one PPCBug section. No push.
+
+        Used by the connected-mode 'Save' button (returns the params
+        panel) and by the home-page section save forms (returns the
+        profile list).
+        """
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        if sess.profile.loader_hint != "ppcbug":
+            return _error("NIOT/ENV only apply to PPCBug"), 400
+        fields = _ppcbug_section_fields(section)
+        if not fields:
+            return _error(f"unknown section {section!r}"), 400
+        _ppcbug_section_save_to_profile(sess.profile, section, request.form)
+        # Re-render the same edit dialog so the user sees the saved
+        # values reflected (and can continue editing or push).
+        return render_template(
+            "_params_edit_section.html",
+            profile=sess.profile,
+            fields=fields,
+            section=section,
+            section_label=section.upper(),
+        )
+
+    @app.post("/params/save/niot")
+    def params_save_niot():
+        return _ppcbug_section_save_only("niot")
+
+    @app.post("/params/save/env")
+    def params_save_env():
+        return _ppcbug_section_save_only("env")
+
+    @app.post("/profiles/<name>/save/<section>")
+    def profile_section_save(name: str, section: str):
+        """Home-page per-section save. No push (no session needed)."""
+        profile = profiles_mod.get_profile(name)
+        if profile is None:
+            return _error(f"no such profile: {name!r}"), 404
+        if profile.loader_hint != "ppcbug":
+            return _error("NIOT/ENV only apply to PPCBug"), 400
+        if section not in ("niot", "env"):
+            return _error(f"unknown section {section!r}"), 400
+        _ppcbug_section_save_to_profile(profile, section, request.form)
+        # Reflect the updated profile in the home page.
+        return _render_profile_list()
 
     @app.post("/params/push")
     def params_push():

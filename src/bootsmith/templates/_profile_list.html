@@ -33,44 +33,69 @@
 {% endif %}{%- endfor %}</pre>
             </details>
           {% endif %}
-          <form id="edit-{{ p.name }}"
-                class="edit-form hidden"
-                hx-post="/profiles/{{ p.name }}/update"
-                hx-target="#main"
-                hx-swap="innerHTML">
-            <div class="row" style="margin-bottom:8px;">
-              <button type="submit" class="primary">Save</button>
-            </div>
-            <h4>Connection</h4>
-            <div class="grid">
-              <label>Name <input name="new_name" required value="{{ p.name }}"
-                                  pattern="[A-Za-z0-9._-]{1,64}"
-                                  title="letters, digits, dot, underscore, hyphen; max 64 chars"></label>
-              <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
-              <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
-              <label>Loader
-                <select name="loader_hint" required data-edit-loader-select="{{ p.name }}">
-                  {% if p.loader_hint not in loader_labels %}
-                    <option value="" selected disabled>-- choose --</option>
-                  {% endif %}
-                  {% for value, label in loader_labels.items() %}
-                    <option value="{{ value }}" {% if p.loader_hint == value %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-            </div>
+          <div id="edit-{{ p.name }}" class="edit-form hidden">
+            {# Connection (name/host/port/loader). Posts to the existing
+               /update endpoint without any param_* fields, so the
+               boot_params stay untouched. #}
+            <form hx-post="/profiles/{{ p.name }}/update"
+                  hx-target="#main"
+                  hx-swap="innerHTML">
+              <h4>Connection</h4>
+              <div class="row" style="margin-bottom:8px;">
+                <button type="submit" class="primary">Save</button>
+              </div>
+              <div class="grid">
+                <label>Name <input name="new_name" required value="{{ p.name }}"
+                                    pattern="[A-Za-z0-9._-]{1,64}"
+                                    title="letters, digits, dot, underscore, hyphen; max 64 chars"></label>
+                <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
+                <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
+                <label>Loader
+                  <select name="loader_hint" required data-edit-loader-select="{{ p.name }}">
+                    {% if p.loader_hint not in loader_labels %}
+                      <option value="" selected disabled>-- choose --</option>
+                    {% endif %}
+                    {% for value, label in loader_labels.items() %}
+                      <option value="{{ value }}" {% if p.loader_hint == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
+            </form>
+
             <div id="edit-params-{{ p.name }}" data-edit-params-container>
               {% if p.loader_hint == "ppcbug" %}
-                <h4>NIOT</h4>
-                {{ boot_param_fields(p.loader_hint, ppcbug_niot_fields, p.boot_params) }}
-                <h4>ENV</h4>
-                {{ boot_param_fields(p.loader_hint, ppcbug_env_fields, p.boot_params) }}
+                <form hx-post="/profiles/{{ p.name }}/save/niot"
+                      hx-target="#main"
+                      hx-swap="innerHTML">
+                  <h4>NIOT</h4>
+                  <div class="row" style="margin-bottom:8px;">
+                    <button type="submit" class="primary">Save NIOT</button>
+                  </div>
+                  {{ boot_param_fields(p.loader_hint, ppcbug_niot_fields, p.boot_params) }}
+                </form>
+                <form hx-post="/profiles/{{ p.name }}/save/env"
+                      hx-target="#main"
+                      hx-swap="innerHTML">
+                  <h4>ENV</h4>
+                  <div class="row" style="margin-bottom:8px;">
+                    <button type="submit" class="primary">Save ENV</button>
+                  </div>
+                  {{ boot_param_fields(p.loader_hint, ppcbug_env_fields, p.boot_params) }}
+                </form>
               {% else %}
-                <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
-                {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+                <form hx-post="/profiles/{{ p.name }}/update"
+                      hx-target="#main"
+                      hx-swap="innerHTML">
+                  <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
+                  <div class="row" style="margin-bottom:8px;">
+                    <button type="submit" class="primary">Save</button>
+                  </div>
+                  {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+                </form>
               {% endif %}
             </div>
-          </form>
+          </div>
         </li>
       {% endfor %}
     </ul>
