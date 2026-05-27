@@ -15,11 +15,12 @@
     <button type="submit"
             class="primary"
             hx-post="/params/push/{{ section }}">Push {{ section_label }}</button>
-    <button type="button"
-            hx-get="/params" hx-target="#params" hx-swap="innerHTML">Cancel</button>
     {% if saved_at %}
       <span class="ok" style="padding:0.25rem 0.5rem;">Saved at {{ saved_at }}</span>
     {% endif %}
+    <button type="button"
+            style="margin-left:auto;"
+            hx-get="/params" hx-target="#params" hx-swap="innerHTML">Close</button>
   </div>
   {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
 </form>
