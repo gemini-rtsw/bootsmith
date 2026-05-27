@@ -34,6 +34,8 @@ def _render_profile_list():
         profiles=profiles_mod.list_profiles(),
         schemas=schemas_mod.SCHEMAS,
         loader_labels=schemas_mod.LOADER_LABELS,
+        ppcbug_niot_fields=ppcbug_mod.NIOT_USER_FIELDS,
+        ppcbug_env_fields=ppcbug_mod.ENV_USER_FIELDS,
     )
 
 
@@ -76,6 +78,8 @@ def create_app() -> Flask:
             profiles=profiles_mod.list_profiles(),
             schemas=schemas_mod.SCHEMAS,
             loader_labels=schemas_mod.LOADER_LABELS,
+            ppcbug_niot_fields=ppcbug_mod.NIOT_USER_FIELDS,
+            ppcbug_env_fields=ppcbug_mod.ENV_USER_FIELDS,
         )
 
     @app.get("/profiles")

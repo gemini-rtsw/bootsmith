@@ -60,8 +60,15 @@
               </label>
             </div>
             <div id="edit-params-{{ p.name }}" data-edit-params-container>
-              <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
-              {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+              {% if p.loader_hint == "ppcbug" %}
+                <h4>NIOT</h4>
+                {{ boot_param_fields(p.loader_hint, ppcbug_niot_fields, p.boot_params) }}
+                <h4>ENV</h4>
+                {{ boot_param_fields(p.loader_hint, ppcbug_env_fields, p.boot_params) }}
+              {% else %}
+                <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
+                {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+              {% endif %}
             </div>
           </form>
         </li>
@@ -103,9 +110,10 @@
       {{ boot_param_fields("vxworks", schemas.get("vxworks", ()), {}) }}
     </template>
     <template id="new-params-ppcbug">
-      <h4>Boot params (RTEMS / PPC)</h4>
-      <p class="hint">PPCBug NIOT fields. Leave blank what doesn't apply.</p>
-      {{ boot_param_fields("ppcbug", schemas.get("ppcbug", ()), {}) }}
+      <h4>NIOT</h4>
+      {{ boot_param_fields("ppcbug", ppcbug_niot_fields, {}) }}
+      <h4>ENV</h4>
+      {{ boot_param_fields("ppcbug", ppcbug_env_fields, {}) }}
     </template>
   </details>
 </section>

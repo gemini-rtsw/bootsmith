@@ -1,16 +1,20 @@
-{# Always-visible action bar. Same buttons no matter which view of the
-   params section is currently rendered. All swaps target the stable
-   #params wrapper with innerHTML so htmx never has to replace the
-   element that owns the click listeners with one of identical id. #}
+{# Action bar that lives at the top of every connected-mode dialog
+   (NIOT/ENV/Diag/CNFG forms, push status, verify, etc.). Boot and
+   Disconnect live in the page-level session header, not here. #}
 {% set loader = profile.loader_hint if profile else "" %}
-{% set boot_label = "Boot (NBO)" if loader == "ppcbug" else "Boot (@)" %}
 <div class="controls">
   {% if loader == "ppcbug" %}
     <form hx-get="/params/edit/niot" hx-target="#params" hx-swap="innerHTML" class="inline">
-      <button type="submit" class="primary" title="Edit and push NIOT (Network IO Teach) network-boot parameters">NIOT</button>
+      <button type="submit" title="Edit and push NIOT (Network IO Teach) network-boot parameters">NIOT</button>
     </form>
     <form hx-get="/params/edit/env" hx-target="#params" hx-swap="innerHTML" class="inline">
       <button type="submit" title="Edit and push ENV (Environment) boot parameters">ENV</button>
+    </form>
+    <form hx-get="/params/diag" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" title="Open the diag picker, choose which PPC1-Diag commands to run">Diag</button>
+    </form>
+    <form hx-get="/params/cnfg" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" title="One-shot VPD repair (CNFG;M) for boards with a corrupt Board Information Block">CNFG</button>
     </form>
   {% else %}
     <form hx-get="/params/edit" hx-target="#params" hx-swap="innerHTML" class="inline">
@@ -20,18 +24,4 @@
       <button type="submit" class="primary">Push to board</button>
     </form>
   {% endif %}
-  <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML" class="inline">
-    <button type="submit" class="primary">{{ boot_label }}</button>
-  </form>
-  {% if loader == "ppcbug" %}
-    <form hx-get="/params/diag" hx-target="#params" hx-swap="innerHTML" class="inline">
-      <button type="submit" title="Open the diag picker, choose which PPC1-Diag commands to run">Diag</button>
-    </form>
-    <form hx-get="/params/cnfg" hx-target="#params" hx-swap="innerHTML" class="inline">
-      <button type="submit" title="One-shot VPD repair (CNFG;M) for boards with a corrupt Board Information Block">CNFG</button>
-    </form>
-  {% endif %}
-  <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
-    <button type="submit" class="danger">Disconnect</button>
-  </form>
 </div>

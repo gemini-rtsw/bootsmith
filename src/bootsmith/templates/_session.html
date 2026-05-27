@@ -1,7 +1,11 @@
 <section class="session" data-profile="{{ profile.name }}">
+  {% set boot_label = "Boot (NBO)" if profile.loader_hint == "ppcbug" else "Boot (@)" %}
   <div class="session-header">
     <h2>{{ profile.name }}</h2>
     <span class="meta">{{ profile.wti_host }}:{{ profile.wti_port }}</span>
+    <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" class="primary">{{ boot_label }}</button>
+    </form>
     <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
       <button type="submit" class="danger">Disconnect</button>
     </form>
