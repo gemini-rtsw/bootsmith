@@ -413,12 +413,17 @@ def create_app() -> Flask:
 
     @app.get("/params/edit")
     def params_edit():
+        """VxWorks edit form. PPCBug is split into NIOT/ENV dialogs."""
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
         if sess is None:
             return _error("no session open"), 404
         profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
         sess.profile = profile
+        if profile.loader_hint == "ppcbug":
+            # Defensive: shouldn't be reachable from the action bar
+            # for PPCBug, but redirect to NIOT if it is.
+            return params_edit_section("niot")
         fields = schemas_mod.fields_for(profile.loader_hint)
         return render_template(
             "_params_edit.html",
@@ -426,15 +431,156 @@ def create_app() -> Flask:
             fields=fields,
         )
 
+    # ---- PPCBug NIOT / ENV split (one dialog per dialogue) -----------
+    # Both sections share the same shape: open a dialog pre-filled with
+    # the saved values; submit posts param_* form fields, the route
+    # saves them to profile.boot_params, walks just that PPCBug
+    # dialogue, reads back, renders a verify panel.
+
+    def _ppcbug_section_fields(section: str):
+        """Return the (label, key) tuple for a PPCBug section."""
+        if section == "niot":
+            return ppcbug_mod.NIOT_USER_FIELDS
+        if section == "env":
+            return ppcbug_mod.ENV_USER_FIELDS
+        return ()
+
+    def params_edit_section(section: str):
+        """Open the NIOT or ENV edit dialog for the active session."""
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
+        sess.profile = profile
+        if profile.loader_hint != "ppcbug":
+            return _error("NIOT/ENV only apply to PPCBug"), 400
+        fields = _ppcbug_section_fields(section)
+        if not fields:
+            return _error(f"unknown section {section!r}"), 400
+        return render_template(
+            "_params_edit_section.html",
+            profile=profile,
+            fields=fields,
+            section=section,
+            section_label=section.upper(),
+        )
+
+    @app.get("/params/edit/niot")
+    def params_edit_niot():
+        return params_edit_section("niot")
+
+    @app.get("/params/edit/env")
+    def params_edit_env():
+        return params_edit_section("env")
+
+    def _ppcbug_section_push(section: str):
+        """Save form values for one PPCBug section, push, verify."""
+        sessions: SessionManager = app.config["sessions"]
+        sess = sessions.current()
+        if sess is None:
+            return _error("no session open"), 404
+        ws = sess.watcher.status()
+        if ws.state != "at_prompt":
+            return _error(f"not at a loader prompt (state={ws.state})"), 409
+        loader = ws.loader or sess.profile.loader_hint
+        if loader != "ppcbug":
+            return _error("NIOT/ENV only apply to PPCBug"), 400
+        fields = _ppcbug_section_fields(section)
+        if not fields:
+            return _error(f"unknown section {section!r}"), 400
+
+        # Pull form values only for this section's keys; merge with the
+        # existing saved boot_params (so the OTHER section's saved
+        # values are preserved on disk).
+        section_keys = {key for _label, key in fields}
+        new_section_values: dict[str, str] = {}
+        for key in section_keys:
+            v = (request.form.get(f"param_{key}") or "").strip()
+            if v:
+                new_section_values[key] = v
+        merged = {
+            k: v for k, v in sess.profile.boot_params.items()
+            if k not in section_keys
+        }
+        merged.update(new_section_values)
+
+        # Save to profile so the next form-open shows what was typed.
+        sess.profile.boot_params = merged
+        profiles_mod.save_profile(sess.profile)
+
+        lock: threading.Lock = app.config["push_lock"]
+        if not lock.acquire(blocking=False):
+            return _error("another push is already in progress"), 409
+
+        # Pick the right driver pair for this section.
+        if section == "niot":
+            write_fn = ppcbug_mod.write_niot
+            read_fn = ppcbug_mod.read_niot
+        else:
+            write_fn = ppcbug_mod.write_env
+            read_fn = ppcbug_mod.read_env
+
+        transport = sess.transport
+        profile = sess.profile
+        values_to_push = new_section_values
+
+        job = app.config["push_job"]
+        job_lock: threading.Lock = app.config["push_job_lock"]
+        with job_lock:
+            job["id"] += 1
+            job["state"] = "running"
+            job["started_at"] = time.time()
+            job["finished_at"] = 0.0
+            job["verify_html"] = ""
+            job["error"] = ""
+
+        def _runner():
+            try:
+                write_fn(transport, values_to_push)
+                verify = read_fn(transport)
+                diff = _diff_section(
+                    fields, values_to_push, verify.params, loader="ppcbug"
+                )
+                with app.app_context():
+                    html = render_template(
+                        "_params_verify.html",
+                        profile=profile,
+                        fields=fields,
+                        current=verify.params,
+                        wrote=values_to_push,
+                        diff=diff,
+                    )
+                with job_lock:
+                    job["state"] = "done"
+                    job["verify_html"] = html
+                    job["finished_at"] = time.time()
+            except Exception as e:
+                with job_lock:
+                    job["state"] = "error"
+                    job["error"] = str(e)
+                    job["finished_at"] = time.time()
+            finally:
+                lock.release()
+
+        t = threading.Thread(target=_runner, daemon=True, name=f"push-{section}-{job['id']}")
+        t.start()
+        return render_template("_params_running.html", profile=profile)
+
+    @app.post("/params/push/niot")
+    def params_push_niot():
+        return _ppcbug_section_push("niot")
+
+    @app.post("/params/push/env")
+    def params_push_env():
+        return _ppcbug_section_push("env")
+
     @app.post("/params/push")
     def params_push():
-        """Kick off a push in a background thread, return immediately.
+        """Push the saved profile boot_params to the board (VxWorks only).
 
-        Long pushes (~25s for PPCBug ENV walks) were blocking Werkzeug
-        from servicing the SSE terminal stream, which made the UI feel
-        frozen. Now we queue the work and respond instantly with a
-        "running" panel; the client polls /params/push/status until
-        the job is "done" and then renders the verify panel inline.
+        PPCBug uses the split NIOT/ENV push routes instead, so its push
+        button is on the action bar via /params/push/niot|env.
         """
         sessions: SessionManager = app.config["sessions"]
         sess = sessions.current()
@@ -443,18 +589,19 @@ def create_app() -> Flask:
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
             return _error(f"not at a loader prompt (state={ws.state})"), 409
-        driver = _driver_for(ws.loader or "")
+        loader = ws.loader or sess.profile.loader_hint
+        if loader == "ppcbug":
+            return _error("use the NIOT/ENV buttons for PPCBug pushes"), 400
+        driver = _driver_for(loader)
         if driver is None:
-            return _error(f"no driver for loader {ws.loader!r}"), 400
+            return _error(f"no driver for loader {loader!r}"), 400
 
         lock: threading.Lock = app.config["push_lock"]
         if not lock.acquire(blocking=False):
             return _error("another push is already in progress"), 409
 
         values = dict(sess.profile.boot_params)
-        loader = ws.loader
         fields = schemas_mod.fields_for(loader)
-        profile_name = sess.profile.name
         transport = sess.transport
         profile = sess.profile
 
@@ -472,39 +619,7 @@ def create_app() -> Flask:
             try:
                 driver.write_params(transport, values)
                 verify = driver.read_params(transport)
-                diff = []
-                for _label, key in fields:
-                    want = values.get(key, "")
-                    got = verify.params.get(key, "")
-                    if not want:
-                        continue
-                    if want == ".":
-                        # VxWorks: `.` clears -> readback should be empty.
-                        # PPCBug: driver translates `.` -> NULL only on
-                        # file-name fields (boot_file_name,
-                        # argument_file_name); elsewhere it keeps the
-                        # current value because NULL is rejected as an
-                        # illegal argument on hex/numeric fields. So a
-                        # `.` mismatch is only meaningful when an empty
-                        # / NULL readback was actually expected. For
-                        # non-file-name keys on PPCBug, suppress the
-                        # diff entry entirely.
-                        if loader == "ppcbug" and key not in (
-                            "boot_file_name",
-                            "argument_file_name",
-                        ):
-                            continue
-                        if got and got.upper() != "NULL":
-                            diff.append({"key": key, "want": "(cleared)", "got": got})
-                        continue
-                    # Single-character values (Y/N/A/W/B/S/G/M etc.)
-                    # are case-insensitive on PPCBug -- the board
-                    # accepts lowercase but always echoes uppercase
-                    # on readback. Don't flag those as mismatches.
-                    if len(want) == 1 and want.casefold() == got.casefold():
-                        continue
-                    if want != got:
-                        diff.append({"key": key, "want": want, "got": got})
+                diff = _diff_section(fields, values, verify.params, loader=loader)
                 with app.app_context():
                     html = render_template(
                         "_params_verify.html",
@@ -528,11 +643,7 @@ def create_app() -> Flask:
 
         t = threading.Thread(target=_runner, daemon=True, name=f"push-{job['id']}")
         t.start()
-
-        return render_template(
-            "_params_running.html",
-            profile=profile,
-        )
+        return render_template("_params_running.html", profile=profile)
 
     @app.get("/params/push/status")
     def params_push_status():
@@ -832,6 +943,35 @@ def _collect_boot_params(form, loader: str) -> dict[str, str]:
         v = v.strip()
         if v:
             out[key] = v
+    return out
+
+
+def _diff_section(fields, wrote: dict[str, str], got: dict[str, str], loader: str) -> list[dict]:
+    """Compute the verify-panel diff for one PPCBug dialogue section.
+
+    Mirrors the original /params/push logic: skip keep-current, treat
+    `.` as clear (with the PPCBug NULL-only-on-file-name caveat), and
+    treat single-char Y/N values as case-insensitive on PPCBug.
+    """
+    out: list[dict] = []
+    for _label, key in fields:
+        want = wrote.get(key, "")
+        seen = got.get(key, "")
+        if not want:
+            continue
+        if want == ".":
+            if loader == "ppcbug" and key not in (
+                "boot_file_name",
+                "argument_file_name",
+            ):
+                continue
+            if seen and seen.upper() != "NULL":
+                out.append({"key": key, "want": "(cleared)", "got": seen})
+            continue
+        if len(want) == 1 and want.casefold() == seen.casefold():
+            continue
+        if want != seen:
+            out.append({"key": key, "want": want, "got": seen})
     return out
 
 

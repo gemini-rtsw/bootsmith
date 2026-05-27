@@ -5,9 +5,21 @@
 {% set loader = profile.loader_hint if profile else "" %}
 {% set boot_label = "Boot (NBO)" if loader == "ppcbug" else "Boot (@)" %}
 <div class="controls">
-  <form hx-post="/params/push" hx-target="#params" hx-swap="innerHTML" class="inline">
-    <button type="submit" class="primary">Push to board</button>
-  </form>
+  {% if loader == "ppcbug" %}
+    <form hx-get="/params/edit/niot" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" class="primary" title="Edit and push NIOT (Network IO Teach) network-boot parameters">NIOT</button>
+    </form>
+    <form hx-get="/params/edit/env" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" title="Edit and push ENV (Environment) boot parameters">ENV</button>
+    </form>
+  {% else %}
+    <form hx-get="/params/edit" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit">Edit</button>
+    </form>
+    <form hx-post="/params/push" hx-target="#params" hx-swap="innerHTML" class="inline">
+      <button type="submit" class="primary">Push to board</button>
+    </form>
+  {% endif %}
   <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML" class="inline">
     <button type="submit" class="primary">{{ boot_label }}</button>
   </form>
@@ -19,9 +31,6 @@
       <button type="submit" title="One-shot VPD repair (CNFG;M) for boards with a corrupt Board Information Block">CNFG</button>
     </form>
   {% endif %}
-  <form hx-get="/params/edit" hx-target="#params" hx-swap="innerHTML" class="inline">
-    <button type="submit">Edit</button>
-  </form>
   <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
     <button type="submit" class="danger">Disconnect</button>
   </form>

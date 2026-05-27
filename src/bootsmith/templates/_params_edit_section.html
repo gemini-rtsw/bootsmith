@@ -1,0 +1,16 @@
+{# PPCBug NIOT or ENV edit dialog. Submits push directly to
+   /params/push/<section>; that route saves THIS section's keys to
+   the profile and walks just that PPCBug dialogue.
+
+   `section` is "niot" or "env"; `section_label` is the uppercase
+   display form; `fields` is the (label, key) list for the section. #}
+{% from "_profile_form_fields.html" import boot_param_fields %}
+{% include "_params_actions.html" %}
+<h3>{{ section_label }} for {{ profile.name }}</h3>
+
+<form hx-post="/params/push/{{ section }}" hx-target="#params" hx-swap="innerHTML">
+  <div class="controls">
+    <button type="submit" class="primary">Save &amp; push {{ section_label }}</button>
+  </div>
+  {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
+</form>

@@ -216,10 +216,15 @@ ENV_USER_EDITABLE_KEYS: tuple[str, ...] = (
     "env_misc_ctrl",
 )
 
-# UI-visible schema = NIOT fields + the subset of ENV the user edits.
-FIELDS: tuple[tuple[str, str], ...] = NIOT_FIELDS + tuple(
+# UI-visible per-dialogue schemas. The connected-mode UI shows NIOT
+# and ENV as separate dialogs (one button each in the action bar);
+# the home-screen profile editor still uses the combined FIELDS tuple
+# so all saved boot_params land in one place.
+NIOT_USER_FIELDS: tuple[tuple[str, str], ...] = NIOT_FIELDS
+ENV_USER_FIELDS: tuple[tuple[str, str], ...] = tuple(
     (label, key) for label, key in ENV_FIELDS if key in ENV_USER_EDITABLE_KEYS
 )
+FIELDS: tuple[tuple[str, str], ...] = NIOT_USER_FIELDS + ENV_USER_FIELDS
 
 
 # Diag-mode commands (entered after `SD` drops us into PPC1-Diag>). Curated
@@ -300,67 +305,65 @@ class WriteResult:
     fields_written: list[str]
 
 
-def read_params(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
-    """Walk NIOT and ENV pressing only Enter; capture current values.
-
-    NIOT is walked fully (only ~20 fields). ENV is walked only as far
-    as needed to capture the user-editable subset, then aborted with
-    `.` — walking all ~85 ENV fields would take ~30s of round-trips
-    and we don't display the rest.
+def read_niot(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
+    """Walk NIOT pressing only Enter; capture current values.
 
     Sends one bare CR first to make sure we're at a fresh prompt
-    before issuing the dialogue command — same defensive measure as
-    vxworks.py.
+    before issuing the dialogue command -- same defensive measure as
+    vxworks.py. NIOT is ~20 fields so the full walk is quick.
     """
     try:
         transport.write(b"\r")
     except Exception:
         pass
     time.sleep(0.1)
-    niot = _walk(transport, "NIOT", NIOT_FIELDS, values={}, timeout=timeout,
-                 stop_after_last_of=None)
-    try:
-        transport.write(b"\r")
-    except Exception:
-        pass
-    time.sleep(0.1)
-    env = _walk(transport, "ENV", ENV_FIELDS, values={}, timeout=timeout,
-                stop_after_last_of=set(ENV_USER_EDITABLE_KEYS))
-    merged_params: dict[str, str] = {}
-    merged_params.update(niot.params)
-    merged_params.update(env.params)
-    return ReadResult(params=merged_params, raw=niot.raw + env.raw)
+    r = _walk(transport, "NIOT", NIOT_FIELDS, values={}, timeout=timeout,
+              stop_after_last_of=None)
+    return ReadResult(params=r.params, raw=r.raw)
 
 
-def write_params(
+def write_niot(
     transport: WTITransport,
     values: dict[str, str],
     timeout: float = 8.0,
 ) -> WriteResult:
-    """Walk NIOT (fully) and ENV (only up to the last user-editable field).
+    """Walk NIOT to the end, typing values for any matching keys."""
+    r = _walk(transport, "NIOT", NIOT_FIELDS, values=values, timeout=timeout,
+              stop_after_last_of=None)
+    return WriteResult(raw=r.raw, fields_written=r.fields_written)
 
-    For ENV, after the last user-editable field is processed we send
-    `.` to abort the dialogue. PPCBug preserves changes made up to that
-    point on abort, so this is safe and skips ~55 unnecessary prompts.
+
+def read_env(transport: WTITransport, timeout: float = 8.0) -> ReadResult:
+    """Walk ENV pressing only Enter; capture the user-editable subset.
+
+    ENV has ~85 fields; we abort with `.` after the last user-editable
+    field, because reading the full thing wastes ~30s of round-trips
+    on stuff we don't display.
     """
-    niot = _walk(transport, "NIOT", NIOT_FIELDS, values=values, timeout=timeout,
-                 stop_after_last_of=None)
     try:
         transport.write(b"\r")
     except Exception:
         pass
     time.sleep(0.1)
-    # Walk ENV all the way to the natural end. Aborting with `.` after
-    # the last user-editable field rolls back changes made to fields
-    # touched mid-dialogue (e.g. Network Auto Boot Enable Y was typed
-    # but the abort dropped it before commit). Slower (~30s) but
-    # values actually save.
-    env = _walk(transport, "ENV", ENV_FIELDS, values=values, timeout=timeout,
-                stop_after_last_of=None)
-    return WriteResult(
-        raw=niot.raw + env.raw,
-        fields_written=niot.fields_written + env.fields_written,
-    )
+    r = _walk(transport, "ENV", ENV_FIELDS, values={}, timeout=timeout,
+              stop_after_last_of=set(ENV_USER_EDITABLE_KEYS))
+    return ReadResult(params=r.params, raw=r.raw)
+
+
+def write_env(
+    transport: WTITransport,
+    values: dict[str, str],
+    timeout: float = 8.0,
+) -> WriteResult:
+    """Walk ENV to the natural end, typing values for matching keys.
+
+    Aborting with `.` after the last user-editable field rolls back
+    changes made mid-dialogue (PPCBug only commits on natural close),
+    so we always walk all ~85 fields. Slower (~30s) but values save.
+    """
+    r = _walk(transport, "ENV", ENV_FIELDS, values=values, timeout=timeout,
+              stop_after_last_of=None)
+    return WriteResult(raw=r.raw, fields_written=r.fields_written)
 
 
 def read_cnfg(transport: WTITransport, timeout: float = 12.0) -> ReadResult:
