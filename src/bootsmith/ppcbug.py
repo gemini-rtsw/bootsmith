@@ -629,7 +629,11 @@ def _walk(
     # newline — the board is waiting for input). We scan one line at a time
     # rather than matching against the tail of raw_buf, because prompts
     # can arrive in bursts and tail-matching skips intermediate prompts.
-    field_prompt_re = re.compile(rb"^([^=\r\n]+?)\s*=([^?\r\n]*)\?\s*$")
+    # LABEL =VALUE? at end of line. The value may itself contain `?`
+    # characters (corrupt CNFG VPD prints values like `"????UUUU"`), so
+    # we capture everything up to the FINAL `?` non-greedily rather than
+    # excluding `?` from the value class.
+    field_prompt_re = re.compile(rb"^([^=\r\n]+?)\s*=([^\r\n]*?)\?\s*$")
     save_prompt_substr = b"Update Non-Volatile RAM"
     reset_prompt_substr = b"Reset Local System"
     # For label extraction we grab the largest known label that ends
@@ -672,9 +676,29 @@ def _walk(
             while time.time() < deadline:
                 drain()
 
-                # Look for next `?` at or past scan_pos, ON its own line
-                # (no chars after it on that line apart from whitespace).
-                qpos = raw_buf.find(b"?", scan_pos)
+                # Look for the `?` that actually ENDS a prompt line: one
+                # followed only by whitespace until the line break (or the
+                # current end of buffer, meaning the board has stopped and
+                # is waiting for input). We search from the RIGHT so that
+                # `?` characters embedded INSIDE a field's displayed value
+                # are skipped -- corrupt VPD prints values like
+                # `"????UUUU"`, and a left-to-right find() would lock onto
+                # the first `?` inside the quotes, never recognize the
+                # prompt, time out, and abort the dialogue with `.`.
+                qpos = -1
+                cand = raw_buf.rfind(b"?")
+                while cand >= scan_pos:
+                    tail_ws = True
+                    for c in raw_buf[cand + 1:]:
+                        if c in (0x0A, 0x0D):
+                            break
+                        if c not in (0x20, 0x09):
+                            tail_ws = False
+                            break
+                    if tail_ws:
+                        qpos = cand
+                        break
+                    cand = raw_buf.rfind(b"?", scan_pos, cand)
                 if qpos >= 0:
                     # Confirm the rest of this line (until line break or
                     # end-of-buffer) is whitespace only. If the line break
