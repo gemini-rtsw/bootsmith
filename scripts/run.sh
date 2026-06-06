@@ -5,12 +5,14 @@
 # in flight, which is why the terminal would hang mid-push.
 #
 # Usage:
-#   scripts/run.sh [PORT]
-# Defaults to port 5050 on 127.0.0.1.
+#   scripts/run.sh [PORT] [HOST]
+# Defaults to port 5050 on 0.0.0.0 (all interfaces, reachable remotely).
+# Pass 127.0.0.1 as HOST to restrict to loopback.
 
 set -e
 
 PORT="${1:-5050}"
+HOST="${2:-0.0.0.0}"
 cd "$(dirname "$0")/.."
 
 # Make sure gunicorn + gevent are installed for the current user.
@@ -24,5 +26,5 @@ exec python3 -m gunicorn \
     -k gevent \
     -w 1 \
     --timeout 120 \
-    -b "127.0.0.1:${PORT}" \
+    -b "${HOST}:${PORT}" \
     bootsmith.wsgi:app
