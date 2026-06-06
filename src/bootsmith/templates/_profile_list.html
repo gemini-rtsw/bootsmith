@@ -17,6 +17,12 @@
             <button type="button"
                     class="edit-toggle"
                     onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
+            <form hx-post="/profiles/{{ p.name }}/duplicate"
+                  hx-target="#main"
+                  hx-swap="innerHTML"
+                  class="inline">
+              <button type="submit" class="edit-toggle">Duplicate</button>
+            </form>
             <form hx-post="/profiles/{{ p.name }}/delete"
                   hx-target="#main"
                   hx-swap="innerHTML"

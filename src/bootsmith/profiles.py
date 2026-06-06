@@ -117,6 +117,44 @@ def rename_profile(old_name: str, new_name: str) -> None:
     src.unlink()
 
 
+def unique_name(base: str) -> str:
+    """Return a profile name based on `base` that doesn't yet exist on disk.
+
+    Tries `base-copy`, then `base-copy2`, `base-copy3`, ... so duplicating
+    the same target repeatedly never collides. The result always satisfies
+    `_NAME_RE` because `base` already does and the suffix is name-safe.
+    """
+    candidate = f"{base}-copy"
+    n = 1
+    while _profile_path(candidate).exists():
+        n += 1
+        candidate = f"{base}-copy{n}"
+    return candidate
+
+
+def duplicate_profile(name: str) -> Profile:
+    """Copy the profile `name` to a fresh unique name and persist it.
+
+    Returns the newly-saved Profile. Raises FileNotFoundError if the
+    source doesn't exist.
+    """
+    src = get_profile(name)
+    if src is None:
+        raise FileNotFoundError(f"no profile named {name!r}")
+    copy = Profile(
+        name=unique_name(name),
+        wti_host=src.wti_host,
+        wti_port=src.wti_port,
+        loader_hint=src.loader_hint,
+        prompts=dict(src.prompts),
+        banners=dict(src.banners),
+        boot_params=dict(src.boot_params),
+        notes=src.notes,
+    )
+    save_profile(copy)
+    return copy
+
+
 def _load_path(path: Path) -> Profile:
     data = json.loads(path.read_text())
     # Older profiles used `last_params`; accept either key.

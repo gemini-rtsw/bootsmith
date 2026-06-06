@@ -123,6 +123,16 @@ def create_app() -> Flask:
         profiles_mod.save_profile(profile)
         return _render_profile_list()
 
+    @app.post("/profiles/<name>/duplicate")
+    def duplicate_profile_route(name: str):
+        try:
+            copy = profiles_mod.duplicate_profile(name)
+        except FileNotFoundError:
+            return _error(f"no such profile: {name!r}"), 404
+        # Re-render with the new copy's edit form already open so the user
+        # can immediately rename it and tweak the fields that differ.
+        return _render_profile_list(saved_profile=copy.name, saved_section="")
+
     @app.post("/profiles/<name>/delete")
     def delete_profile_route(name: str):
         profiles_mod.delete_profile(name)
