@@ -15,14 +15,31 @@ PORT="${1:-5050}"
 HOST="${2:-0.0.0.0}"
 cd "$(dirname "$0")/.."
 
+# Bootsmith needs Python 3.10+; pick the first interpreter on PATH that
+# qualifies (system python3 on most boxes, python3.11 on RHEL/Rocky 8
+# where the default python3 is still 3.6).
+PYTHON=""
+for candidate in python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" >/dev/null 2>&1 &&
+        "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+        PYTHON="$candidate"
+        break
+    fi
+done
+if [ -z "$PYTHON" ]; then
+    echo "[run.sh] no Python 3.10+ interpreter found on PATH." >&2
+    echo "[run.sh] on RHEL/Rocky 8, install one from AppStream: sudo dnf install python3.11" >&2
+    exit 1
+fi
+
 # Make sure gunicorn + gevent are installed for the current user.
-python3 -c "import gunicorn, gevent" 2>/dev/null || {
-    echo "[run.sh] installing gunicorn + gevent (--user)"
-    python3 -m pip install --user "gunicorn>=21.0" "gevent>=23.0"
+"$PYTHON" -c "import gunicorn, gevent" 2>/dev/null || {
+    echo "[run.sh] installing gunicorn + gevent (--user) with $PYTHON"
+    "$PYTHON" -m pip install --user "gunicorn>=21.0" "gevent>=23.0"
 }
 
 export PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}"
-exec python3 -m gunicorn \
+exec "$PYTHON" -m gunicorn \
     -k gevent \
     -w 1 \
     --timeout 120 \
