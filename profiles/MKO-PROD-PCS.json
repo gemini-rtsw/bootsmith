@@ -1,0 +1,33 @@
+{
+  "banners": {},
+  "boot_params": {
+    "argument_file_name": "/gem_sw/prod/redirector/sim7/stTestcrcs-mk-IOC.boot",
+    "boot_file_name": "/gem_sw/prod/redirector/sim7/crcs-mk-IOC.boot",
+    "bootp_request_control": "W",
+    "bootp_retry": "05",
+    "broadcast_ip": "10.1.2.255",
+    "client_ip": "10.1.2.177",
+    "env_auto_boot_enable": "N",
+    "env_negate_sysfail": "Y",
+    "env_net_auto_boot_enable": "N",
+    "env_pci_slave_1_base": "00000000",
+    "env_pci_slave_1_bound": "00000000",
+    "env_pci_slave_1_ctrl": "00000000",
+    "env_pci_slave_1_xlate": "00000000",
+    "env_pci_slave_2_base": "00000000",
+    "env_pci_slave_2_bound": "00000000",
+    "env_pci_slave_2_ctrl": "00000000",
+    "env_pci_slave_2_xlate": "00000000",
+    "env_prep_boot": "Y",
+    "gateway_ip": "10.1.2.1",
+    "server_ip": "10.2.71.12",
+    "subnet_mask": "255.255.255.0",
+    "tftp_retry": "05"
+  },
+  "loader_hint": "ppcbug",
+  "name": "MKO-PROD-PCS",
+  "notes": "",
+  "prompts": {},
+  "wti_host": "10.1.5.85",
+  "wti_port": 2308
+}
