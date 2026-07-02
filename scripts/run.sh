@@ -32,10 +32,11 @@ if [ -z "$PYTHON" ]; then
     exit 1
 fi
 
-# Make sure Flask, gunicorn, and gevent are installed for the current user.
-"$PYTHON" -c "import flask, gunicorn, gevent" 2>/dev/null || {
-    echo "[run.sh] installing flask + gunicorn + gevent (--user) with $PYTHON"
-    "$PYTHON" -m pip install --user flask "gunicorn>=21.0" "gevent>=23.0"
+# Make sure Bootsmith's dependencies (per pyproject.toml) are installed
+# for the current user, plus gunicorn/gevent to serve it.
+"$PYTHON" -c "import flask, flask_sock, gunicorn, gevent" 2>/dev/null || {
+    echo "[run.sh] installing bootsmith deps + gunicorn + gevent (--user) with $PYTHON"
+    "$PYTHON" -m pip install --user -e . "gunicorn>=21.0" "gevent>=23.0"
 }
 
 export PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}"
