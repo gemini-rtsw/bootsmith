@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 # Make sure gunicorn + gevent are installed for the current user.
 python3 -c "import gunicorn, gevent" 2>/dev/null || {
     echo "[run.sh] installing gunicorn + gevent (--user)"
-    pip install --user "gunicorn>=21.0" "gevent>=23.0"
+    python3 -m pip install --user "gunicorn>=21.0" "gevent>=23.0"
 }
 
 export PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}"
