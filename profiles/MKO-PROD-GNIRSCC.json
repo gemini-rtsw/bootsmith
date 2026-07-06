@@ -18,9 +18,9 @@
     "user": "gemvx"
   },
   "loader_hint": "vxworks",
-  "name": "GNIRSCC-sim8",
+  "name": "MKO-PROD-GNIRSCC",
   "notes": "",
   "prompts": {},
-  "wti_host": "10.1.5.85",
-  "wti_port": 2308
+  "wti_host": "10.2.2.86",
+  "wti_port": 10003
 }

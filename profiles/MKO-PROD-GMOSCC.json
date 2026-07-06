@@ -1,0 +1,26 @@
+{
+  "banners": {},
+  "boot_params": {
+    "boot_device": "dc",
+    "file_name": "/gemini/external/vxWorks/tornado2.2/mv2700/vxWorks",
+    "flags": "0x8",
+    "ftp_password": ".",
+    "gateway_inet": ".",
+    "host_inet": "10.2.2.57",
+    "host_name": "pisces-control",
+    "inet_on_backplane": ".",
+    "inet_on_ethernet": "10.2.2.121:ffffff00",
+    "other": ".",
+    "processor_number": "0",
+    "startup_script": "/gemini/GEM8.6/gmos/gmos/bin/ppc604_long/startup",
+    "target_name": "gmoscc",
+    "unit_number": "0",
+    "user": "gemvx"
+  },
+  "loader_hint": "vxworks",
+  "name": "MKO-PROD-GMOSCC",
+  "notes": "",
+  "prompts": {},
+  "wti_host": "10.2.4.105",
+  "wti_port": 2303
+}

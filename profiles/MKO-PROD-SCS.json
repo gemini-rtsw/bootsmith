@@ -1,0 +1,33 @@
+{
+  "banners": {},
+  "boot_params": {
+    "argument_file_name": "/gem_prod/epics/ioc/scs_mk/stscs",
+    "boot_file_name": "/gem_prod/epics/ioc/scs_mk/scs.boot",
+    "bootp_request_control": "W",
+    "bootp_retry": "05",
+    "broadcast_ip": "10.2.2.255",
+    "client_ip": "10.2.2.107",
+    "env_auto_boot_enable": "N",
+    "env_negate_sysfail": "Y",
+    "env_net_auto_boot_enable": "N",
+    "env_pci_slave_1_base": "00000000",
+    "env_pci_slave_1_bound": "00000000",
+    "env_pci_slave_1_ctrl": "00000000",
+    "env_pci_slave_1_xlate": "00000000",
+    "env_pci_slave_2_base": "00000000",
+    "env_pci_slave_2_bound": "00000000",
+    "env_pci_slave_2_ctrl": "00000000",
+    "env_pci_slave_2_xlate": "00000000",
+    "env_prep_boot": "Y",
+    "gateway_ip": "10.2.2.1",
+    "server_ip": "10.2.71.30",
+    "subnet_mask": "255.255.255.0",
+    "tftp_retry": "05"
+  },
+  "loader_hint": "ppcbug",
+  "name": "MKO-PROD-SCS",
+  "notes": "",
+  "prompts": {},
+  "wti_host": "10.2.2.19",
+  "wti_port": 5007
+}
