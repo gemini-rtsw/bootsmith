@@ -239,6 +239,19 @@ button.danger {
   border-radius: 4px;
 }
 .edit-form.hidden { display: none; }
+
+.connect-choice {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.connect-choice.hidden { display: none; }
+
+.terminal-servers { margin-top: 0.4rem; }
+.ts-row { margin-bottom: 0.4rem; }
+.ts-row input { flex: 1; }
+
 .edit-toggle {
   background: transparent;
   color: var(--accent);

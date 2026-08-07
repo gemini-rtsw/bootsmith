@@ -1,3 +1,23 @@
+{# Macro: render the repeatable name/host/port rows for a profile's
+   terminal servers, plus an "+ Add" button. `container_id` must be
+   unique on the page (each profile's edit form and the new-target form
+   each get their own). `rows` is a list of TerminalServer (or plain
+   dicts with name/host/port) to pre-fill; pass one blank dict to start
+   a form with a single empty row. #}
+{% macro terminal_server_rows(container_id, rows) %}
+<div id="{{ container_id }}" class="terminal-servers">
+  {% for ts in rows %}
+    <div class="ts-row row">
+      <input name="ts_name" placeholder="production" required value="{{ ts.name }}">
+      <input name="ts_host" placeholder="10.1.5.85" required value="{{ ts.host }}">
+      <input name="ts_port" type="number" min="1" max="65535" placeholder="2308" required value="{{ ts.port }}">
+      <button type="button" class="edit-toggle ts-remove">Remove</button>
+    </div>
+  {% endfor %}
+</div>
+<button type="button" class="edit-toggle ts-add" data-target="{{ container_id }}">+ Add terminal server</button>
+{% endmacro %}
+
 {# Macro: render editable boot-param fields for the given loader. #}
 {% macro boot_param_fields(loader, fields, values) %}
 {% if fields %}

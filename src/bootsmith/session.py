@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .profiles import Profile
+from .profiles import Profile, TerminalServer
 from .transport import TelnetTransport
 from .watcher import BannerWatcher
 
@@ -12,6 +12,7 @@ from .watcher import BannerWatcher
 @dataclass
 class Session:
     profile: Profile
+    terminal_server: TerminalServer
     transport: TelnetTransport
     watcher: BannerWatcher
     last_error: Optional[str] = None
@@ -32,7 +33,7 @@ class SessionManager:
     def current(self) -> Session | None:
         return self._session
 
-    def open(self, profile: Profile) -> Session:
+    def open(self, profile: Profile, terminal_server: TerminalServer) -> Session:
         # If a session is already open, close it cleanly first so we don't
         # leak a TCP socket every time the user clicks a profile twice.
         existing = self._session
@@ -50,7 +51,7 @@ class SessionManager:
             if delay:
                 _t.sleep(delay)
             try:
-                transport = TelnetTransport(profile.wti_host, profile.wti_port)
+                transport = TelnetTransport(terminal_server.host, terminal_server.port)
                 transport.open(timeout=4.0)
                 # Probe: a CR should provoke either a prompt echo OR the
                 # WTI dropping us within ~1s if it doesn't actually want us.
@@ -73,13 +74,18 @@ class SessionManager:
                 transport = None
         if transport is None:
             raise ConnectionError(
-                f"could not get a stable connection to {profile.wti_host}:{profile.wti_port}"
+                f"could not get a stable connection to {terminal_server.host}:{terminal_server.port}"
                 + (f" ({last_err})" if last_err else "")
             )
         watcher = BannerWatcher(transport, profile)
         watcher.start()
         with self._lock:
-            self._session = Session(profile=profile, transport=transport, watcher=watcher)
+            self._session = Session(
+                profile=profile,
+                terminal_server=terminal_server,
+                transport=transport,
+                watcher=watcher,
+            )
 
         # Auto-prompt: nudge the board into echoing its prompt so the user
         # doesn't have to click anything after connecting. Try multiple

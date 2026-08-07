@@ -29,6 +29,22 @@ def profile_dir() -> Path:
 
 
 @dataclass
+class TerminalServer:
+    """A WTI serial-console port a Profile can be reached through.
+
+    A Profile is a boot config (loader, params, prompts) that's independent
+    of which physical VME it's talking to. The same config often needs to
+    reach more than one WTI -- e.g. a production unit and a test-bench unit
+    for the same board -- so a Profile holds a list of these instead of a
+    single host/port.
+    """
+
+    name: str
+    host: str
+    port: int
+
+
+@dataclass
 class Profile:
     """A saved VME target.
 
@@ -39,13 +55,18 @@ class Profile:
     """
 
     name: str
-    wti_host: str
-    wti_port: int
+    terminal_servers: list[TerminalServer] = field(default_factory=list)
     loader_hint: str = "auto"
     prompts: dict = field(default_factory=dict)
     banners: dict = field(default_factory=dict)
     boot_params: dict = field(default_factory=dict)
     notes: str = ""
+
+    def terminal_server(self, name: str) -> TerminalServer | None:
+        for ts in self.terminal_servers:
+            if ts.name == name:
+                return ts
+        return None
 
 
 def _profile_path(name: str) -> Path:
@@ -143,8 +164,9 @@ def duplicate_profile(name: str) -> Profile:
         raise FileNotFoundError(f"no profile named {name!r}")
     copy = Profile(
         name=unique_name(name),
-        wti_host=src.wti_host,
-        wti_port=src.wti_port,
+        terminal_servers=[
+            TerminalServer(ts.name, ts.host, ts.port) for ts in src.terminal_servers
+        ],
         loader_hint=src.loader_hint,
         prompts=dict(src.prompts),
         banners=dict(src.banners),
@@ -159,10 +181,21 @@ def _load_path(path: Path) -> Profile:
     data = json.loads(path.read_text())
     # Older profiles used `last_params`; accept either key.
     boot_params = data.get("boot_params") or data.get("last_params") or {}
+    if "terminal_servers" in data:
+        terminal_servers = [
+            TerminalServer(name=ts["name"], host=ts["host"], port=int(ts["port"]))
+            for ts in data["terminal_servers"]
+        ]
+    else:
+        # Pre-multi-server profiles stored a single wti_host/wti_port pair
+        # directly on the profile. Fold it into a one-entry list so callers
+        # only ever deal with the list form.
+        terminal_servers = [
+            TerminalServer(name="default", host=data["wti_host"], port=int(data["wti_port"]))
+        ]
     return Profile(
         name=data["name"],
-        wti_host=data["wti_host"],
-        wti_port=int(data["wti_port"]),
+        terminal_servers=terminal_servers,
         loader_hint=data.get("loader_hint", "auto"),
         prompts=data.get("prompts", {}),
         banners=data.get("banners", {}),

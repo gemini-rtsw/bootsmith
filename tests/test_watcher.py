@@ -70,7 +70,7 @@ def _wait_for(predicate, timeout=2.0, interval=0.02):
     return False
 
 
-PROFILE = Profile(name="t", wti_host="x", wti_port=1)
+PROFILE = Profile(name="t", terminal_servers=[])
 
 
 class WatcherTests(unittest.TestCase):
@@ -157,7 +157,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_loader_hint_skips_other(self):
         # Profile hinted to ppcbug — VxWorks banner must NOT trip the watcher.
-        p = Profile(name="t", wti_host="x", wti_port=1, loader_hint="ppcbug")
+        p = Profile(name="t", terminal_servers=[], loader_hint="ppcbug")
         t = FakeTransport()
         w = BannerWatcher(t, p)
         w.start()

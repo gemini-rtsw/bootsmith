@@ -99,24 +99,24 @@ def create_app() -> Flask:
     @app.post("/profiles")
     def create_profile():
         name = (request.form.get("name") or "").strip()
-        host = (request.form.get("wti_host") or "").strip()
-        try:
-            port = int(request.form.get("wti_port") or "")
-        except ValueError:
-            return _error("wti_port must be an integer"), 400
         loader_hint = (request.form.get("loader_hint") or "").strip()
-        if not name or not host:
-            return _error("name and wti_host are required"), 400
+        if not name:
+            return _error("name is required"), 400
         if loader_hint not in VALID_LOADERS:
             return _error(
                 f"loader is required; pick one of {sorted(VALID_LOADERS)}"
             ), 400
+        try:
+            terminal_servers = _collect_terminal_servers(request.form)
+        except ValueError as e:
+            return _error(str(e)), 400
+        if not terminal_servers:
+            return _error("at least one terminal server is required"), 400
         if profiles_mod.get_profile(name) is not None:
             return _error(f"profile {name!r} already exists"), 409
         profile = profiles_mod.Profile(
             name=name,
-            wti_host=host,
-            wti_port=port,
+            terminal_servers=terminal_servers,
             loader_hint=loader_hint,
             boot_params=_collect_boot_params(request.form, loader_hint),
         )
@@ -143,21 +143,24 @@ def create_app() -> Flask:
         existing = profiles_mod.get_profile(name)
         if existing is None:
             return _error(f"no such profile: {name!r}"), 404
-        host = (request.form.get("wti_host") or existing.wti_host).strip()
-        try:
-            port = int(request.form.get("wti_port") or existing.wti_port)
-        except ValueError:
-            return _error("wti_port must be an integer"), 400
         loader_hint = (request.form.get("loader_hint") or existing.loader_hint).strip()
         if loader_hint not in VALID_LOADERS:
             return _error(
                 f"loader is required; pick one of {sorted(VALID_LOADERS)}"
             ), 400
-        if not host:
-            return _error("wti_host cannot be empty"), 400
+        # ts_name is only present when the Connection form (which owns the
+        # terminal-server rows) was submitted; the NIOT/ENV/boot-params
+        # forms post to this same endpoint without it, and must leave the
+        # existing terminal servers untouched.
+        if "ts_name" in request.form:
+            try:
+                terminal_servers = _collect_terminal_servers(request.form)
+            except ValueError as e:
+                return _error(str(e)), 400
+            if not terminal_servers:
+                return _error("at least one terminal server is required"), 400
+            existing.terminal_servers = terminal_servers
         loader_changed = loader_hint != existing.loader_hint
-        existing.wti_host = host
-        existing.wti_port = port
         existing.loader_hint = loader_hint
         # Overwrite boot_params if the form submitted any param_* field,
         # or if the loader changed (old fields don't apply to new loader).
@@ -209,18 +212,31 @@ def create_app() -> Flask:
         profile = profiles_mod.get_profile(name)
         if profile is None:
             return _error(f"no such profile: {name!r}"), 404
+        if not profile.terminal_servers:
+            return _error(f"profile {name!r} has no terminal servers configured"), 400
+        ts_name = (request.form.get("terminal_server") or "").strip()
+        if ts_name:
+            terminal_server = profile.terminal_server(ts_name)
+            if terminal_server is None:
+                return _error(f"no such terminal server: {ts_name!r}"), 400
+        elif len(profile.terminal_servers) == 1:
+            terminal_server = profile.terminal_servers[0]
+        else:
+            return _error("multiple terminal servers configured; choose one"), 400
         sessions: SessionManager = app.config["sessions"]
         try:
-            sessions.open(profile)
+            sessions.open(profile, terminal_server)
         except Exception as e:
             print(
                 f"[session/open] failed for {name!r} -> "
-                f"{profile.wti_host}:{profile.wti_port}: {type(e).__name__}: {e}",
+                f"{terminal_server.host}:{terminal_server.port}: {type(e).__name__}: {e}",
                 file=_sys.stderr,
                 flush=True,
             )
             return _error(str(e)), 400
-        return render_template("_session.html", profile=profile)
+        return render_template(
+            "_session.html", profile=profile, terminal_server=terminal_server
+        )
 
     @app.post("/session/close")
     def session_close():
@@ -1034,6 +1050,37 @@ def _collect_boot_params(form, loader: str) -> dict[str, str]:
         if v:
             out[key] = v
     return out
+
+
+def _collect_terminal_servers(form) -> list[profiles_mod.TerminalServer]:
+    """Pull the repeated ts_name/ts_host/ts_port rows into TerminalServers.
+
+    Blank template rows (all three fields empty) are skipped so the
+    "+ Add terminal server" row doesn't need to be filled in to submit.
+    Raises ValueError with a user-facing message on any other problem.
+    """
+    names = form.getlist("ts_name")
+    hosts = form.getlist("ts_host")
+    ports = form.getlist("ts_port")
+    servers: list[profiles_mod.TerminalServer] = []
+    seen: set[str] = set()
+    for raw_name, raw_host, raw_port in zip(names, hosts, ports):
+        name = raw_name.strip()
+        host = raw_host.strip()
+        port = raw_port.strip()
+        if not name and not host and not port:
+            continue
+        if not name or not host or not port:
+            raise ValueError("each terminal server needs a name, host, and port")
+        if name in seen:
+            raise ValueError(f"duplicate terminal server name: {name!r}")
+        seen.add(name)
+        try:
+            port_int = int(port)
+        except ValueError:
+            raise ValueError(f"terminal server port must be an integer: {port!r}")
+        servers.append(profiles_mod.TerminalServer(name=name, host=host, port=port_int))
+    return servers
 
 
 def _diff_section(fields, wrote: dict[str, str], got: dict[str, str], loader: str) -> list[dict]:

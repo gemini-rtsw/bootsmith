@@ -1,4 +1,4 @@
-{% from "_profile_form_fields.html" import boot_param_fields %}
+{% from "_profile_form_fields.html" import boot_param_fields, terminal_server_rows %}
 <section class="profiles">
   <h2>Targets</h2>
   {% if profiles %}
@@ -6,14 +6,26 @@
       {% for p in profiles %}
         <li>
           <div class="row">
-            <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML" class="inline">
-              <input type="hidden" name="name" value="{{ p.name }}">
-              <button type="submit" class="primary">{{ p.name }}</button>
-            </form>
-            <span class="meta">
-              {{ p.wti_host }}:{{ p.wti_port }} &mdash;
-              {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
-            </span>
+            {% if p.terminal_servers|length > 1 %}
+              <button type="button" class="primary"
+                      onclick="document.getElementById('connect-choice-{{ p.name }}').classList.toggle('hidden')">{{ p.name }}</button>
+              <span class="meta">
+                {{ p.terminal_servers|length }} terminal servers &mdash;
+                {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
+              </span>
+            {% else %}
+              <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML" class="inline">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                {% if p.terminal_servers %}
+                  <input type="hidden" name="terminal_server" value="{{ p.terminal_servers[0].name }}">
+                {% endif %}
+                <button type="submit" class="primary">{{ p.name }}</button>
+              </form>
+              <span class="meta">
+                {% if p.terminal_servers %}{{ p.terminal_servers[0].host }}:{{ p.terminal_servers[0].port }} &mdash;{% endif %}
+                {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
+              </span>
+            {% endif %}
             <button type="button"
                     class="edit-toggle"
                     onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
@@ -31,6 +43,17 @@
               <button type="submit" class="danger">Delete</button>
             </form>
           </div>
+          {% if p.terminal_servers|length > 1 %}
+            <div id="connect-choice-{{ p.name }}" class="connect-choice hidden">
+              {% for ts in p.terminal_servers %}
+                <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML" class="inline">
+                  <input type="hidden" name="name" value="{{ p.name }}">
+                  <input type="hidden" name="terminal_server" value="{{ ts.name }}">
+                  <button type="submit">{{ ts.name }} ({{ ts.host }}:{{ ts.port }})</button>
+                </form>
+              {% endfor %}
+            </div>
+          {% endif %}
           {% if p.boot_params %}
             <details class="params-view">
               <summary>View params</summary>
@@ -66,8 +89,6 @@
                 <label>Name <input name="new_name" required value="{{ p.name }}"
                                     pattern="[A-Za-z0-9._-]{1,64}"
                                     title="letters, digits, dot, underscore, hyphen; max 64 chars"></label>
-                <label>WTI host <input name="wti_host" required value="{{ p.wti_host }}"></label>
-                <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" value="{{ p.wti_port }}"></label>
                 <label>Loader
                   <select name="loader_hint" required data-edit-loader-select="{{ p.name }}">
                     {% if p.loader_hint not in loader_labels %}
@@ -79,6 +100,12 @@
                   </select>
                 </label>
               </div>
+              <p class="hint" style="margin-top:0.5rem;">
+                Terminal servers &mdash; add one per WTI this config can reach
+                (e.g. "production", "test"). Connect will ask which one to
+                use when there's more than one.
+              </p>
+              {{ terminal_server_rows("edit-ts-" + p.name, p.terminal_servers) }}
             </form>
 
             <div id="edit-params-{{ p.name }}" data-edit-params-container>
@@ -130,8 +157,6 @@
       <h4>Connection</h4>
       <div class="grid">
         <label>Name <input name="name" required placeholder="MCS"></label>
-        <label>WTI host <input name="wti_host" required placeholder="10.1.5.85"></label>
-        <label>WTI port <input name="wti_port" required type="number" min="1" max="65535" placeholder="2308"></label>
         <label>Loader
           <select name="loader_hint" required id="new-loader-select">
             <option value="" selected disabled>-- choose --</option>
@@ -141,6 +166,11 @@
           </select>
         </label>
       </div>
+      <p class="hint" style="margin-top:0.5rem;">
+        Terminal servers &mdash; add one per WTI this config can reach
+        (e.g. "production", "test").
+      </p>
+      {{ terminal_server_rows("new-target-ts", [{"name": "", "host": "", "port": ""}]) }}
       <div id="new-target-params">
         <p class="hint">Choose a loader to see its boot-param fields.</p>
       </div>
@@ -166,6 +196,42 @@
 
 <script>
   (function () {
+    // Repeatable terminal-server rows (name/host/port), used by both the
+    // "Add target" form and each profile's Connection edit form. Rows are
+    // attached here rather than via a document-level delegated listener
+    // because the whole #main subtree (including this script) is replaced
+    // on every htmx swap -- a delegated document listener would pile up a
+    // fresh copy on every swap instead of going away with the old DOM.
+    function removeTsRow(row) {
+      const container = row.parentElement;
+      if (container && container.querySelectorAll(".ts-row").length > 1) {
+        row.remove();
+      }
+    }
+
+    function wireTsRemove(row) {
+      const btn = row.querySelector(".ts-remove");
+      if (btn) btn.addEventListener("click", () => removeTsRow(row));
+    }
+
+    document.querySelectorAll(".ts-row").forEach(wireTsRemove);
+
+    document.querySelectorAll(".ts-add").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const container = document.getElementById(btn.getAttribute("data-target"));
+        if (!container) return;
+        const row = document.createElement("div");
+        row.className = "ts-row row";
+        row.innerHTML =
+          '<input name="ts_name" placeholder="production" required>' +
+          '<input name="ts_host" placeholder="10.1.5.85" required>' +
+          '<input name="ts_port" type="number" min="1" max="65535" placeholder="2308" required>' +
+          '<button type="button" class="edit-toggle ts-remove">Remove</button>';
+        container.appendChild(row);
+        wireTsRemove(row);
+      });
+    });
+
     function swapInto(container, loader, headingPrefix) {
       const tpl = document.getElementById("new-params-" + loader);
       if (tpl) {
