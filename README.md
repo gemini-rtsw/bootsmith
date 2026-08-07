@@ -34,6 +34,37 @@ default bridge networking is fine. If a WTI is unreachable from the bridge, swap
 The image pins Python 3.12: the transport layer falls back to the stdlib
 `telnetlib`, which was removed in 3.13.
 
+## Deploy from GHCR
+
+GitHub Actions builds the image on every push to `main` and publishes it to
+`ghcr.io/gemini-rtsw/bootsmith` (`.github/workflows/build-image.yml`). Tags:
+`latest` on `main`, `sha-<short>` per commit, and semver tags for `v*` releases.
+
+On the target host you only need `docker-compose.deploy.yml`, `scripts/deploy.sh`
+and a `profiles/` directory — no source tree, no local build:
+
+```sh
+./deploy.sh            # pull latest and (re)start
+./deploy.sh logs       # follow logs
+./deploy.sh down       # stop and remove
+```
+
+Set `BOOTSMITH_PORT` if 8080 is taken (it is on `mkorpmfs-lv1`, where `rpm-repo`
+already holds it):
+
+```sh
+BOOTSMITH_PORT=8081 ./deploy.sh
+```
+
+Pin a specific build instead of tracking `latest`:
+
+```sh
+BOOTSMITH_IMAGE=ghcr.io/gemini-rtsw/bootsmith:sha-1a2b3c4 ./deploy.sh
+```
+
+If the GHCR package is private, authenticate once on the target with a PAT that
+has `read:packages`: `docker login ghcr.io -u <user>`.
+
 ## Deploy to an air-gapped host
 
 For a target with no GitHub / GHCR / Docker Hub / PyPI access, build a bundle on

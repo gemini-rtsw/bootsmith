@@ -1,0 +1,33 @@
+# Deploy-side compose file: pulls the image built by GitHub Actions instead of
+# building from source. Copy this file plus ./profiles to the target host.
+#
+#   BOOTSMITH_PORT=8081 docker compose -f docker-compose.deploy.yml up -d
+#
+# or use scripts/deploy.sh, which wraps this with the right uid/gid.
+services:
+  bootsmith:
+    image: ${BOOTSMITH_IMAGE:-ghcr.io/gemini-rtsw/bootsmith:latest}
+    container_name: bootsmith
+    restart: unless-stopped
+
+    # Run as the host user so profile JSON written by the app stays owned by
+    # you on the host, not root. scripts/deploy.sh sets these from id -u/-g.
+    user: "${BOOTSMITH_UID:-1000}:${BOOTSMITH_GID:-1000}"
+
+    ports:
+      # mkorpmfs-lv1 already runs rpm-repo on 8080, so set BOOTSMITH_PORT
+      # there. The container always listens on 8080 internally.
+      - "${BOOTSMITH_PORT:-8080}:8080"
+
+    volumes:
+      # Configs live on the host and are editable there while the container
+      # runs. Do not bake profiles into the image.
+      - ./profiles:/data/profiles
+
+    environment:
+      BOOTSMITH_PROFILES_DIR: /data/profiles
+
+    # Bootsmith only makes *outbound* telnet connections to WTI console
+    # servers, so default bridge networking is fine. If a WTI sits on a
+    # network the bridge can't reach, comment out `ports:` above and use:
+    #   network_mode: host
