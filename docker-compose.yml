@@ -1,0 +1,27 @@
+services:
+  bootsmith:
+    build: .
+    image: bootsmith:latest
+    container_name: bootsmith
+    restart: unless-stopped
+
+    # Run as the host user so profile JSON written by the app stays owned by
+    # you on the host, not root. scripts/docker-run.sh sets these from
+    # `id -u` / `id -g`; the defaults are the usual single-user values.
+    user: "${BOOTSMITH_UID:-1000}:${BOOTSMITH_GID:-1000}"
+
+    ports:
+      - "${BOOTSMITH_PORT:-8080}:8080"
+
+    volumes:
+      # Configs live on the host and are editable there while the container
+      # runs. This is the whole point -- do not bake profiles into the image.
+      - ./profiles:/data/profiles
+
+    environment:
+      BOOTSMITH_PROFILES_DIR: /data/profiles
+
+    # Bootsmith only makes *outbound* telnet connections to WTI console
+    # servers, so default bridge networking is fine. If a WTI sits on a
+    # network the bridge can't reach, comment out `ports:` above and use:
+    #   network_mode: host

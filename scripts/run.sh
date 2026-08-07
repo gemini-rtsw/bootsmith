@@ -6,12 +6,12 @@
 #
 # Usage:
 #   scripts/run.sh [PORT] [HOST]
-# Defaults to port 5050 on 0.0.0.0 (all interfaces, reachable remotely).
+# Defaults to port 8080 on 0.0.0.0 (all interfaces, reachable remotely).
 # Pass 127.0.0.1 as HOST to restrict to loopback.
 
 set -e
 
-PORT="${1:-5050}"
+PORT="${1:-8080}"
 HOST="${2:-0.0.0.0}"
 cd "$(dirname "$0")/.."
 
