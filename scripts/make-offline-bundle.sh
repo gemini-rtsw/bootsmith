@@ -24,8 +24,13 @@ BUNDLE="bootsmith-offline"
 STAGE_DIR="$STAGE/$BUNDLE"
 mkdir -p "$STAGE_DIR"
 
-echo "[bundle] building $IMAGE"
-docker build -t "$IMAGE" .
+# --platform is not optional: the target hosts are x86_64, and a bundle built
+# on an Apple Silicon Mac would otherwise ship an arm64 image that exits 255
+# in a restart loop there. Override PLATFORM only for a non-amd64 target.
+PLATFORM="${PLATFORM:-linux/amd64}"
+
+echo "[bundle] building $IMAGE for $PLATFORM"
+docker build --platform "$PLATFORM" -t "$IMAGE" .
 
 echo "[bundle] saving image (this takes a moment)"
 docker save "$IMAGE" | gzip -9 >"$STAGE_DIR/bootsmith-image.tar.gz"
