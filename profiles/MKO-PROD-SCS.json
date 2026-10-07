@@ -28,6 +28,16 @@
   "name": "MKO-PROD-SCS",
   "notes": "",
   "prompts": {},
-  "wti_host": "10.2.2.19",
-  "wti_port": 5007
+  "terminal_servers": [
+    {
+      "host": "10.2.2.19",
+      "name": "production",
+      "port": 5007
+    },
+    {
+      "host": "10.2.4.109",
+      "name": "mkocomrm test vme",
+      "port": 2303
+    }
+  ]
 }

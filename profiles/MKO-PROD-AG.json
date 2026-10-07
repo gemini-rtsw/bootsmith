@@ -28,6 +28,16 @@
   "name": "MKO-PROD-AG",
   "notes": "",
   "prompts": {},
-  "wti_host": "10.2.4.100",
-  "wti_port": 2303
+  "terminal_servers": [
+    {
+      "host": "10.2.4.100",
+      "name": "production",
+      "port": 2303
+    },
+    {
+      "host": "10.2.4.109",
+      "name": "mkocmprm test vme",
+      "port": 2303
+    }
+  ]
 }

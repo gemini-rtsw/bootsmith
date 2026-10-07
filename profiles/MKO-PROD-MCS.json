@@ -1,12 +1,12 @@
 {
   "banners": {},
   "boot_params": {
-    "argument_file_name": "/gem_prod/epics/ioc/crcs_mk/stcrcs",
-    "boot_file_name": "/gem_prod/epics/ioc/crcs_mk/crcs.boot",
+    "argument_file_name": "/gem_prod/epics/ioc/mcs_mk/stmcs",
+    "boot_file_name": "/gem_prod/epics/ioc/mcs_mk/mcs.boot",
     "bootp_request_control": "W",
     "bootp_retry": "05",
     "broadcast_ip": "10.2.2.255",
-    "client_ip": "10.2.2.108",
+    "client_ip": "10.2.2.105",
     "env_auto_boot_enable": "N",
     "env_negate_sysfail": "Y",
     "env_net_auto_boot_enable": "N",
@@ -25,19 +25,24 @@
     "tftp_retry": "05"
   },
   "loader_hint": "ppcbug",
-  "name": "MKO-PROD-CRCS",
+  "name": "MKO-PROD-MCS",
   "notes": "",
   "prompts": {},
   "terminal_servers": [
     {
-      "host": "10.2.2.19",
-      "name": "production",
-      "port": 5004
+      "host": "10.1.5.85",
+      "name": "m2lab test vme",
+      "port": 2308
     },
     {
       "host": "10.2.4.109",
       "name": "mkocmprm test vme",
       "port": 2303
+    },
+    {
+      "host": "10.2.4.101",
+      "name": "production",
+      "port": 2302
     }
   ]
 }

@@ -21,6 +21,16 @@
   "name": "MKO-PROD-GNIRSCC",
   "notes": "",
   "prompts": {},
-  "wti_host": "10.2.2.86",
-  "wti_port": 10003
+  "terminal_servers": [
+    {
+      "host": "10.2.2.86",
+      "name": "production",
+      "port": 10003
+    },
+    {
+      "host": "10.2.4.109",
+      "name": "mkocmprm test vme",
+      "port": 2303
+    }
+  ]
 }

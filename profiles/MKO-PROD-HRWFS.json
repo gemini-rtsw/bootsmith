@@ -18,6 +18,16 @@
   "name": "MKO-PROD-HRWFS",
   "notes": "",
   "prompts": {},
-  "wti_host": "10.1.5.85",
-  "wti_port": 2308
+  "terminal_servers": [
+    {
+      "host": "10.2.4.109",
+      "name": "production",
+      "port": 2308
+    },
+    {
+      "host": "10.1.5.85",
+      "name": "mkocmprm test vme",
+      "port": 2303
+    }
+  ]
 }

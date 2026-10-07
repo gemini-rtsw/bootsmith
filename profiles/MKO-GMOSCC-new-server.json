@@ -6,8 +6,8 @@
     "flags": "0x8",
     "ftp_password": ".",
     "gateway_inet": ".",
-    "host_inet": "10.2.2.57",
-    "host_name": "pisces-control",
+    "host_inet": "10.2.2.145",
+    "host_name": "mkotcsbootv2-lv1",
     "inet_on_backplane": ".",
     "inet_on_ethernet": "10.2.2.121:ffffff00",
     "other": ".",
@@ -18,7 +18,7 @@
     "user": "gemvx"
   },
   "loader_hint": "vxworks",
-  "name": "MKO-PROD-GMOSCC",
+  "name": "MKO-GMOSCC-new-server",
   "notes": "",
   "prompts": {},
   "terminal_servers": [
