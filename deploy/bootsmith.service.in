@@ -1,0 +1,51 @@
+# systemd unit for Bootsmith on a Docker host.
+#
+# THIS FILE IS A TEMPLATE. @IMAGE@ is substituted by the RPM spec with the
+# image built alongside the package. Edit bootsmith.service.in, never a
+# generated bootsmith.service.
+#
+# Installed by the bootsmith RPM and owned by it: an upgrade overwrites this
+# file, which is how a new release moves the host to a new image. Host settings
+# go in /etc/sysconfig/bootsmith, which survives upgrades.
+#
+# Foreground `docker run --rm`, deliberately NOT --restart: systemd owns the
+# lifecycle. With both, `systemctl stop` leaves the container running.
+
+[Unit]
+Description=Bootsmith (VME crate boot console)
+Documentation=https://github.com/gemini-rtsw/bootsmith
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+
+# Pinned to the exact image this RPM was built with, so `rpm -q bootsmith`
+# tells you what runs and `dnf downgrade bootsmith` is a real rollback.
+Environment=IMAGE=@IMAGE@
+Environment=BOOTSMITH_PORT=8080
+EnvironmentFile=-/etc/sysconfig/bootsmith
+
+# Best-effort pull: a registry outage must not stop a working local image.
+ExecStartPre=-/usr/bin/docker pull ${IMAGE}
+ExecStartPre=-/usr/bin/docker rm -f bootsmith
+
+# Runs as the bootsmith user (created by the RPM) so profiles the app writes
+# into /var/lib/bootsmith/profiles stay owned by that user, not root. The shell
+# is only there to look up its uid/gid.
+ExecStart=/bin/sh -c 'exec /usr/bin/docker run --rm --name bootsmith \
+  --user "$(id -u bootsmith):$(id -g bootsmith)" \
+  -p ${BOOTSMITH_PORT}:8080 \
+  -v /var/lib/bootsmith/profiles:/data/profiles \
+  --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  ${IMAGE}'
+
+ExecStop=/usr/bin/docker stop -t 10 bootsmith
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+name: Build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
+    secrets: inherit
+    with:
+      scripts_dir: gemini-rtsw-ci
+      el_version: '9'
+      profile: lightweight
+      spec_path: packaging/bootsmith.spec
+      app_image: Dockerfile
+
+  # Rebuilds rpm-repo:latest once, after the build has pushed its scratch tag.
+  publish:
+    needs: build
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
+    secrets: inherit

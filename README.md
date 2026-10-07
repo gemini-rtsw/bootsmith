@@ -34,11 +34,26 @@ default bridge networking is fine. If a WTI is unreachable from the bridge, swap
 The image pins Python 3.12: the transport layer falls back to the stdlib
 `telnetlib`, which was removed in 3.13.
 
+## Deploy by RPM
+
+CI (`gemini-rtsw-ci`, `.github/workflows/ci.yml`) builds the image and an RPM
+on every push to `main`. The RPM installs a systemd unit pinned to the image
+from the same commit, a `bootsmith` user, and the seed profiles in
+`/var/lib/bootsmith/profiles`. The version lives in `packaging/bootsmith.spec`.
+
+```sh
+sudo dnf install bootsmith
+sudo systemctl enable --now bootsmith
+```
+
+Set the host port in `/etc/sysconfig/bootsmith` (default 8080). Profile edits
+made in the app survive upgrades. The new image takes effect on the next
+`systemctl restart bootsmith`.
+
 ## Deploy from GHCR
 
-GitHub Actions builds the image on every push to `main` and publishes it to
-`ghcr.io/gemini-rtsw/bootsmith` (`.github/workflows/build-image.yml`). Tags:
-`latest` on `main`, `sha-<short>` per commit, and semver tags for `v*` releases.
+The same CI publishes the image to `ghcr.io/gemini-rtsw/bootsmith`. Tags:
+`latest`, `<version>`, and `<version>-git<short>` per commit.
 
 On the target host you only need `docker-compose.deploy.yml`, `scripts/deploy.sh`
 and a `profiles/` directory — no source tree, no local build:
@@ -59,7 +74,7 @@ BOOTSMITH_PORT=8081 ./deploy.sh
 Pin a specific build instead of tracking `latest`:
 
 ```sh
-BOOTSMITH_IMAGE=ghcr.io/gemini-rtsw/bootsmith:sha-1a2b3c4 ./deploy.sh
+BOOTSMITH_IMAGE=ghcr.io/gemini-rtsw/bootsmith:0.1.0-git1a2b3c4 ./deploy.sh
 ```
 
 If the GHCR package is private, authenticate once on the target with a PAT that
