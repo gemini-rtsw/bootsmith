@@ -18,9 +18,11 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Dependencies first so edits to src/ don't invalidate the pip layer.
+# packaging is listed explicitly: gunicorn 26.2.0 stopped depending on it, but
+# its gevent worker still imports it, so without it the container exits at start.
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir \
-    "flask>=3.0" "flask-sock>=0.7" "gunicorn>=21.0" "gevent>=23.0"
+    "flask>=3.0" "flask-sock>=0.7" "gunicorn>=21.0" "gevent>=23.0" packaging
 
 COPY src ./src
 RUN pip install --no-cache-dir --no-deps . \
