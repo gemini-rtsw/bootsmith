@@ -16,7 +16,7 @@
 
 Name:           bootsmith
 Version:        %{specver}
-Release:        1.git%{git_hash}%{?dist}
+Release:        2.git%{git_hash}%{?dist}
 Summary:        Bootsmith: VME crate boot console (runs as a container)
 
 License:        Proprietary
@@ -79,10 +79,16 @@ exit 0
 %{_unitdir}/bootsmith.service
 %config(noreplace) %{_sysconfdir}/sysconfig/bootsmith
 %dir %attr(0755,bootsmith,bootsmith) %{_sharedstatedir}/bootsmith
-%dir %attr(0755,bootsmith,bootsmith) %{_sharedstatedir}/bootsmith/profiles
+# World-writable so profiles can be added or replaced on the host without root.
+# The app saves by writing a temp file and renaming it, so it can update any
+# profile in here, whoever owns the file.
+%dir %attr(0777,bootsmith,bootsmith) %{_sharedstatedir}/bootsmith/profiles
 # Seed profiles. The app edits them in place, so keep local edits on upgrade.
 %config(noreplace) %attr(0644,bootsmith,bootsmith) %{_sharedstatedir}/bootsmith/profiles/*.json
 
 %changelog
+* Tue Oct 06 2026 Hawi Stecher <hawi.stecher@noirlab.edu> - 0.1.0-2
+- Make /var/lib/bootsmith/profiles writable by all users.
+
 * Tue Oct 06 2026 Hawi Stecher <hawi.stecher@noirlab.edu> - 0.1.0-1
 - Package for the gemini-rtsw-ci pipeline: systemd unit pinned to the image.
