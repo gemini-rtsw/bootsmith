@@ -2,3 +2,6 @@
 	path = gemini-rtsw-ci
 	url = https://github.com/gemini-rtsw/gemini-rtsw-ci.git
 	branch = main
+[submodule "profiles"]
+	path = profiles
+	url = https://github.com/gemini-rtsw/bootsmith-config.git
