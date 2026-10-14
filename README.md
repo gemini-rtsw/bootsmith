@@ -38,17 +38,30 @@ The image pins Python 3.12: the transport layer falls back to the stdlib
 
 CI (`gemini-rtsw-ci`, `.github/workflows/ci.yml`) builds the image and an RPM
 on every push to `main`. The RPM installs a systemd unit pinned to the image
-from the same commit, a `bootsmith` user, and the seed profiles in
-`/var/lib/bootsmith/profiles`. The version lives in `packaging/bootsmith.spec`.
+from the same commit and a `bootsmith` user. The version lives in
+`packaging/bootsmith.spec`.
 
 ```sh
 sudo dnf install bootsmith
 sudo systemctl enable --now bootsmith
 ```
 
-Set the host port in `/etc/sysconfig/bootsmith` (default 8080). Profile edits
-made in the app survive upgrades. The new image takes effect on the next
-`systemctl restart bootsmith`.
+Set the host port in `/etc/sysconfig/bootsmith` (default 8080). The new image
+takes effect on the next `systemctl restart bootsmith`.
+
+### Presets are a git repo
+
+`/var/lib/bootsmith/profiles` is a clone of
+[bootsmith-config](https://github.com/gemini-rtsw/bootsmith-config). The first
+install unpacks it; upgrades never touch it. Bootsmith is the pathfinder for
+opening config repos like this to sci/ops: the repo, not the package, is the
+source of truth.
+
+```sh
+cd /var/lib/bootsmith/profiles
+git pull                                  # take presets merged to main; no restart
+git add -A && git commit -m "..." && git push   # keep changes made in the app
+```
 
 ## Deploy from GHCR
 
