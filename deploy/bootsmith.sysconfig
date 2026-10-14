@@ -4,3 +4,8 @@
 
 # Host port for the web UI (the container always listens on 8080).
 BOOTSMITH_PORT=8080
+
+# Where operators push profile changes from /var/lib/bootsmith/profiles. Set as
+# origin when the profiles repo is first created on this host. Change it to the
+# internal git server once there is one (and run: git remote set-url origin ...).
+BOOTSMITH_PROFILES_REMOTE=git@github.com:gemini-rtsw/bootsmith-config.git
