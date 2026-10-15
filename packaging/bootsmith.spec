@@ -66,6 +66,10 @@ fi
 # much history the repo grows.
 rm -rf profiles-repo
 git -c safe.directory='*' clone -q --depth 1 --no-local "file://%{profiles_repo}" profiles-repo
+# --depth implies --single-branch, which fetches only the branch the submodule
+# checkout happens to be on (a PR branch, say). Fetch every branch, so
+# origin/main exists and `git pull` on the host follows main.
+git -C profiles-repo config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
 git -C profiles-repo checkout -q -B main
 git -C profiles-repo update-ref refs/remotes/origin/main HEAD
 git -C profiles-repo branch -q --set-upstream-to=origin/main main
