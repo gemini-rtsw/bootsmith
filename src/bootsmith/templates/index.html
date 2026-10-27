@@ -6,6 +6,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
+  <script>
+    // Per-tab session id. Tabs share the cookie, so every request also
+    // carries this id and each tab gets its own connection. It is kept in
+    // sessionStorage only across a reload of this tab: it is taken out on
+    // load and put back on pagehide, so a duplicated tab (which copies
+    // sessionStorage) never finds it and makes its own.
+    window.BS_TAB = (function () {
+      let id = null;
+      try {
+        id = sessionStorage.getItem("bootsmith_tab");
+        sessionStorage.removeItem("bootsmith_tab");
+      } catch (_) {}
+      if (!/^[A-Za-z0-9_-]{8,64}$/.test(id || "")) {
+        const b = new Uint8Array(12);
+        crypto.getRandomValues(b);  // randomUUID needs https; this doesn't
+        id = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+      }
+      window.addEventListener("pagehide", () => {
+        try { sessionStorage.setItem("bootsmith_tab", id); } catch (_) {}
+      });
+      return id;
+    })();
+    document.addEventListener("htmx:configRequest", (evt) => {
+      evt.detail.headers["X-Bootsmith-Tab"] = window.BS_TAB;
+    });
+    (function () {
+      const origFetch = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        init = Object.assign({}, init);
+        const headers = new Headers(init.headers || {});
+        headers.set("X-Bootsmith-Tab", window.BS_TAB);
+        init.headers = headers;
+        return origFetch(input, init);
+      };
+    })();
+  </script>
 </head>
 <body>
   <header>
@@ -20,7 +56,7 @@
   </main>
 
   <footer>
-    <small>v0.1 &mdash; one connection per browser; a board can be open in only one browser at a time</small>
+    <small>v0.1 &mdash; one connection per tab; a board can be open in only one tab at a time</small>
   </footer>
 
   <script>
@@ -92,7 +128,7 @@
 
       function openSSE() {
         try {
-          sse = new EventSource("/session/stream");
+          sse = new EventSource("/session/stream?tab=" + encodeURIComponent(window.BS_TAB));
         } catch (e) {
           scheduleSSEReconnect();
           return;
@@ -289,6 +325,18 @@
         div.textContent = "Could not reach the Bootsmith server.";
         flash.replaceChildren(div);
       });
+
+      // Cancel on a connect in progress: tell the server to stop retrying
+      // (that frees the port), then drop the browser's pending request.
+      window.bsCancelConnect = function (btn) {
+        const form = btn.closest("form");
+        fetch("/session/cancel", { method: "POST", credentials: "same-origin" });
+        htmx.trigger(form, "htmx:abort");
+        const div = document.createElement("div");
+        div.className = "error";
+        div.textContent = "Connect cancelled.";
+        flash.replaceChildren(div);
+      };
     })();
   </script>
 </body>

@@ -61,6 +61,10 @@ class PortInUseError(ConnectionError):
     """The WTI port is already held by another browser's session."""
 
 
+class ConnectCancelled(ConnectionError):
+    """The browser cancelled its connect before it finished."""
+
+
 class SessionManager:
     """Holds one session per browser, keyed by a session id (cookie).
 
@@ -75,6 +79,9 @@ class SessionManager:
         # Ports being connected right now (connect takes seconds), so two
         # browsers clicking the same board at once can't both get through.
         self._connecting: dict[tuple[str, int], str] = {}
+        # One cancel flag per browser with a connect in flight; set by
+        # cancel_connect() so the retry loop stops and frees the port.
+        self._cancels: dict[str, threading.Event] = {}
         self._idle_timeout = idle_timeout
 
     def current(self, sid: str) -> Session | None:
@@ -106,21 +113,26 @@ class SessionManager:
                 other = owner[1]
                 if other is None:
                     raise PortInUseError(
-                        f"{key[0]}:{key[1]} is being connected by another browser"
+                        f"{key[0]}:{key[1]} is being connected in another tab or browser"
                     )
                 raise PortInUseError(
-                    f"{key[0]}:{key[1]} is in use by another browser "
+                    f"{key[0]}:{key[1]} is in use by another tab or browser "
                     f"({other.profile.name}, connected at "
                     f"{time.strftime('%H:%M', time.localtime(other.opened_at))}). "
                     "Disconnect it there first."
                 )
             self._connecting[key] = sid
+            cancel = threading.Event()
+            self._cancels[sid] = cancel
         try:
             # If this browser already has a session, close it cleanly first
             # so we don't leak a TCP socket every time the user clicks a
             # profile twice.
             self.close(sid)
-            transport = self._connect(terminal_server)
+            transport = self._connect(terminal_server, cancel)
+            if cancel.is_set():
+                transport.close()
+                raise ConnectCancelled("Connect cancelled.")
             watcher = BannerWatcher(transport, profile)
             watcher.start()
             sess = Session(
@@ -134,6 +146,8 @@ class SessionManager:
         finally:
             with self._lock:
                 self._connecting.pop(key, None)
+                if self._cancels.get(sid) is cancel:
+                    del self._cancels[sid]
 
         # Auto-prompt: nudge the board into echoing its prompt so the user
         # doesn't have to click anything after connecting. Try multiple
@@ -154,16 +168,28 @@ class SessionManager:
         threading.Thread(target=_bump, name="auto-prompt", daemon=True).start()
         return sess
 
+    def cancel_connect(self, sid: str) -> bool:
+        """Stop this browser's in-flight connect. True if one was running."""
+        with self._lock:
+            cancel = self._cancels.get(sid)
+        if cancel is None:
+            return False
+        cancel.set()
+        return True
+
     @staticmethod
-    def _connect(terminal_server: TerminalServer) -> TelnetTransport:
+    def _connect(
+        terminal_server: TerminalServer, cancel: Optional[threading.Event] = None
+    ) -> TelnetTransport:
         # WTI side may not have realized the prior session ended yet, or
         # the board may be mid-boot and not forwarding. Retry the connect
         # with backoff up to ~12s so the user doesn't have to spam the
         # button.
         last_err: Optional[Exception] = None
+        cancel = cancel or threading.Event()
         for delay in (0.0, 1.0, 2.0, 3.0, 5.0):
-            if delay:
-                time.sleep(delay)
+            if cancel.wait(delay):
+                raise ConnectCancelled("Connect cancelled.")
             try:
                 transport = TelnetTransport(terminal_server.host, terminal_server.port)
                 transport.open(timeout=4.0)

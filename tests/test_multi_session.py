@@ -20,6 +20,9 @@ from bootsmith.app import SID_COOKIE, create_app
 from bootsmith.profiles import Profile, TerminalServer
 from bootsmith.transport import TransportStatus
 
+# setUp patches _connect; keep the real one for the retry-loop test.
+_REAL_CONNECT = session_mod.SessionManager._connect
+
 
 class FakeTransport:
     def __init__(self, host, port):
@@ -56,7 +59,7 @@ class FakeWatcher:
         )
 
 
-def _fake_connect(ts):
+def _fake_connect(ts, cancel=None):
     return FakeTransport(ts.host, ts.port)
 
 
@@ -97,6 +100,33 @@ class MultiSessionTests(unittest.TestCase):
     def _status(self, client):
         return client.get("/session/status").get_json()
 
+    def test_two_tabs_of_one_browser_hold_separate_sessions(self):
+        tab1 = {"X-Bootsmith-Tab": "tab1aaaaaaaa"}
+        tab2 = {"X-Bootsmith-Tab": "tab2bbbbbbbb"}
+        post = lambda h, n: self.a.post(
+            "/session/open", data={"name": n, "terminal_server": "production"}, headers=h
+        )
+        self.assertEqual(post(tab1, "GNIRSCC").status_code, 200)
+        self.assertEqual(post(tab2, "MCS").status_code, 200)
+        self.assertEqual(len(self.sessions.all()), 2)
+        st = lambda h: self.a.get("/session/status", headers=h).get_json()
+        self.assertEqual(st(tab1)["profile"], "GNIRSCC")
+        self.assertEqual(st(tab2)["profile"], "MCS")
+        # The stream (EventSource can't send headers) finds its tab by ?tab=.
+        self.assertEqual(self.a.get("/session/status?tab=tab2bbbbbbbb").get_json()["profile"], "MCS")
+        # Same board from the other tab is refused, not stolen.
+        self.assertEqual(post(tab2, "GNIRSCC").status_code, 409)
+        self.assertEqual(st(tab1)["profile"], "GNIRSCC")
+        # Disconnecting one tab leaves the other.
+        self.a.post("/session/close", headers=tab1)
+        self.assertFalse(st(tab1)["open"])
+        self.assertEqual(st(tab2)["profile"], "MCS")
+
+    def test_bad_tab_id_falls_back_to_cookie(self):
+        self._open(self.a, "GNIRSCC")
+        resp = self.a.get("/session/status", headers={"X-Bootsmith-Tab": "x"})
+        self.assertEqual(resp.get_json()["profile"], "GNIRSCC")
+
     def test_first_request_sets_session_cookie(self):
         c = self.app.test_client()
         resp = c.get("/")
@@ -124,7 +154,7 @@ class MultiSessionTests(unittest.TestCase):
         self._open(self.a, "GNIRSCC")
         resp = self._open(self.b, "GNIRSCC")
         self.assertEqual(resp.status_code, 409)
-        self.assertIn("in use by another browser", resp.get_data(as_text=True))
+        self.assertIn("in use by another tab or browser", resp.get_data(as_text=True))
         # A keeps its connection.
         self.assertEqual(self._status(self.a)["profile"], "GNIRSCC")
 
@@ -141,7 +171,7 @@ class MultiSessionTests(unittest.TestCase):
     def test_concurrent_connect_to_same_port_only_one_wins(self):
         gate = threading.Event()
 
-        def slow_connect(ts):
+        def slow_connect(ts, cancel=None):
             gate.wait(2)
             return FakeTransport(ts.host, ts.port)
 
@@ -157,7 +187,63 @@ class MultiSessionTests(unittest.TestCase):
             t.join(3)
         self.assertEqual(results["a"], 200)
         self.assertEqual(resp_b.status_code, 409)
-        self.assertIn("being connected by another browser", resp_b.get_data(as_text=True))
+        self.assertIn("being connected in another tab or browser", resp_b.get_data(as_text=True))
+
+    def test_cancel_stops_connect_and_frees_port(self):
+        started = threading.Event()
+
+        def hanging_connect(ts, cancel):
+            started.set()
+            if cancel.wait(5):
+                raise session_mod.ConnectCancelled("Connect cancelled.")
+            return FakeTransport(ts.host, ts.port)
+
+        results = {}
+        with mock.patch.object(session_mod.SessionManager, "_connect", staticmethod(hanging_connect)):
+            t = threading.Thread(target=lambda: results.setdefault("a", self._open(self.a, "GNIRSCC")))
+            t.start()
+            self.assertTrue(started.wait(2))
+            t0 = time.time()
+            self.assertEqual(self.a.post("/session/cancel").status_code, 204)
+            t.join(3)
+        self.assertLess(time.time() - t0, 1)
+        self.assertEqual(results["a"].status_code, 409)
+        self.assertIn("Connect cancelled.", results["a"].get_data(as_text=True))
+        self.assertFalse(self._status(self.a)["open"])
+        # The port is free for another browser straight away.
+        self.assertEqual(self._open(self.b, "GNIRSCC").status_code, 200)
+
+    def test_cancel_only_affects_own_browser(self):
+        started = threading.Event()
+
+        def hanging_connect(ts, cancel):
+            started.set()
+            if cancel.wait(1):
+                raise session_mod.ConnectCancelled("Connect cancelled.")
+            return FakeTransport(ts.host, ts.port)
+
+        results = {}
+        with mock.patch.object(session_mod.SessionManager, "_connect", staticmethod(hanging_connect)):
+            t = threading.Thread(target=lambda: results.setdefault("a", self._open(self.a, "GNIRSCC")))
+            t.start()
+            self.assertTrue(started.wait(2))
+            self.b.post("/session/cancel")
+            t.join(3)
+        self.assertEqual(results["a"].status_code, 200)
+
+    def test_cancel_with_nothing_running_is_harmless(self):
+        self._open(self.a, "GNIRSCC")
+        self.assertEqual(self.a.post("/session/cancel").status_code, 204)
+        self.assertEqual(self._status(self.a)["profile"], "GNIRSCC")
+
+    def test_connect_retry_loop_stops_on_cancel(self):
+        cancel = threading.Event()
+        cancel.set()
+        ts = TerminalServer(name="production", host="10.2.2.86", port=10003)
+        with mock.patch.object(session_mod, "TelnetTransport") as tt:
+            with self.assertRaises(session_mod.ConnectCancelled):
+                _REAL_CONNECT(ts, cancel)
+        tt.assert_not_called()
 
     def test_push_job_is_per_session(self):
         self._open(self.a, "GNIRSCC")

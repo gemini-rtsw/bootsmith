@@ -6,28 +6,14 @@
       {% for p in profiles %}
         <li>
           <div class="row">
-            {% if p.terminal_servers|length > 1 %}
-              <button type="button" class="primary"
-                      onclick="document.getElementById('connect-choice-{{ p.name }}').classList.toggle('hidden')">{{ p.name }}</button>
-              <span class="meta">
-                {{ p.terminal_servers|length }} terminal servers &mdash;
-                {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
-              </span>
-            {% else %}
-              <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
-                    hx-disabled-elt="find button" class="inline">
-                <input type="hidden" name="name" value="{{ p.name }}">
-                {% if p.terminal_servers %}
-                  <input type="hidden" name="terminal_server" value="{{ p.terminal_servers[0].name }}">
-                {% endif %}
-                <button type="submit" class="primary">{{ p.name }}</button>
-                <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)</span>
-              </form>
-              <span class="meta">
-                {% if p.terminal_servers %}{{ p.terminal_servers[0].host }}:{{ p.terminal_servers[0].port }} &mdash;{% endif %}
-                {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
-              </span>
-            {% endif %}
+            {# Connect always opens the list of terminal servers, even when
+               there is only one, so the control works the same everywhere. #}
+            <button type="button" class="primary"
+                    onclick="document.getElementById('connect-choice-{{ p.name }}').classList.toggle('hidden')">{{ p.name }} &#9662;</button>
+            <span class="meta">
+              {% if p.terminal_servers|length == 1 %}{{ p.terminal_servers[0].host }}:{{ p.terminal_servers[0].port }}{% else %}{{ p.terminal_servers|length }} terminal servers{% endif %} &mdash;
+              {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
+            </span>
             <button type="button"
                     class="edit-toggle"
                     onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
@@ -45,19 +31,21 @@
               <button type="submit" class="danger">Delete</button>
             </form>
           </div>
-          {% if p.terminal_servers|length > 1 %}
-            <div id="connect-choice-{{ p.name }}" class="connect-choice hidden">
-              {% for ts in p.terminal_servers %}
-                <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
-                      hx-disabled-elt="find button" class="inline">
-                  <input type="hidden" name="name" value="{{ p.name }}">
-                  <input type="hidden" name="terminal_server" value="{{ ts.name }}">
-                  <button type="submit">{{ ts.name }} ({{ ts.host }}:{{ ts.port }})</button>
-                  <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)</span>
-                </form>
-              {% endfor %}
-            </div>
-          {% endif %}
+          <div id="connect-choice-{{ p.name }}" class="connect-choice hidden">
+            {% for ts in p.terminal_servers %}
+              <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
+                    hx-disabled-elt="find button" class="inline">
+                <input type="hidden" name="name" value="{{ p.name }}">
+                <input type="hidden" name="terminal_server" value="{{ ts.name }}">
+                <button type="submit">{{ ts.name }} ({{ ts.host }}:{{ ts.port }})</button>
+                <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)
+                  <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)">Cancel</button>
+                </span>
+              </form>
+            {% else %}
+              <span class="meta">No terminal servers configured &mdash; use Edit to add one.</span>
+            {% endfor %}
+          </div>
           {% if p.boot_params %}
             <details class="params-view">
               <summary>View params</summary>
@@ -106,8 +94,8 @@
               </div>
               <p class="hint" style="margin-top:0.5rem;">
                 Terminal servers &mdash; add one per WTI this config can reach
-                (e.g. "production", "test"). Connect will ask which one to
-                use when there's more than one.
+                (e.g. "production", "test"). Connect lists them to choose
+                from.
               </p>
               {{ terminal_server_rows("edit-ts-" + p.name, p.terminal_servers) }}
             </form>
