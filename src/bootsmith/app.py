@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
+import secrets
 import threading
 import time
 from dataclasses import asdict
 
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, g, jsonify, render_template, request, stream_with_context
 from flask_sock import Sock
 from markupsafe import escape
 
@@ -12,7 +14,12 @@ from . import ppcbug as ppcbug_mod
 from . import profiles as profiles_mod
 from . import schemas as schemas_mod
 from . import vxworks as vxworks_mod
-from .session import SessionManager
+from .session import PortInUseError, SessionManager
+
+# Browser identity for multi-session support: each browser gets a random
+# id cookie and its own session (WTI connection, push/CNFG jobs).
+SID_COOKIE = "bootsmith_sid"
+_SID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")
 
 
 def _driver_for(loader: str):
@@ -52,35 +59,45 @@ def _render_profile_list(saved_profile: str = "", saved_section: str = ""):
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    # One session per browser, keyed by the SID_COOKIE cookie. Push/CNFG
+    # job state and the push lock live on each Session (see session.py).
     app.config["sessions"] = SessionManager()
-    # Serialize push/read-params operations so two concurrent clicks
-    # never run two _walk() calls against the same transport at once
-    # (they would fight for queue subscribers and produce interleaved
-    # nonsense).
-    app.config["push_lock"] = threading.Lock()
-    # In-memory state for the latest async push job. Single-session app,
-    # so one slot is enough. See /params/push (queues a job) and
-    # /params/push/status (polls it).
-    app.config["push_job"] = {
-        "id": 0,
-        "state": "idle",        # idle | running | done | error
-        "started_at": 0.0,
-        "finished_at": 0.0,
-        "verify_html": "",      # rendered _params_verify.html when done
-        "error": "",
-    }
-    app.config["push_job_lock"] = threading.Lock()
-    # Same single-slot pattern for the one-shot CNFG;M VPD repair.
-    app.config["cnfg_job"] = {
-        "id": 0,
-        "state": "idle",        # idle | running | done | error
-        "started_at": 0.0,
-        "finished_at": 0.0,
-        "done_html": "",
-        "error": "",
-    }
-    app.config["cnfg_job_lock"] = threading.Lock()
     sock = Sock(app)
+
+    def _sid() -> str:
+        sid = g.get("bootsmith_sid")
+        if sid:
+            return sid
+        sid = request.cookies.get(SID_COOKIE, "")
+        if not _SID_RE.fullmatch(sid):
+            sid = secrets.token_urlsafe(24)
+            g.bootsmith_new_sid = True
+        g.bootsmith_sid = sid
+        return sid
+
+    def _current_session():
+        return app.config["sessions"].current(_sid())
+
+    @app.before_request
+    def _ensure_sid():
+        _sid()
+
+    @app.after_request
+    def _set_sid_cookie(resp):
+        if g.get("bootsmith_new_sid"):
+            resp.set_cookie(SID_COOKIE, g.bootsmith_sid, httponly=True, samesite="Lax")
+        return resp
+
+    # Free the WTI ports of browsers that went away (closed tab, crash).
+    def _reaper():
+        while True:
+            time.sleep(60)
+            try:
+                app.config["sessions"].reap_idle()
+            except Exception:
+                pass
+
+    threading.Thread(target=_reaper, name="session-reaper", daemon=True).start()
 
     @app.get("/")
     def index():
@@ -186,8 +203,7 @@ def create_app() -> Flask:
         # If the edit was triggered from inside an active session, return
         # the params panel so we don't blow away the session view.
         if request.headers.get("X-Return") == "params":
-            sessions: SessionManager = app.config["sessions"]
-            sess = sessions.current()
+            sess = _current_session()
             if sess is not None:
                 sess.profile = existing
             fields = schemas_mod.fields_for(existing.loader_hint)
@@ -226,7 +242,9 @@ def create_app() -> Flask:
             return _error("multiple terminal servers configured; choose one"), 400
         sessions: SessionManager = app.config["sessions"]
         try:
-            sessions.open(profile, terminal_server)
+            sessions.open(_sid(), profile, terminal_server)
+        except PortInUseError as e:
+            return _error(str(e)), 409
         except Exception as e:
             print(
                 f"[session/open] failed for {name!r} -> "
@@ -242,13 +260,12 @@ def create_app() -> Flask:
     @app.post("/session/close")
     def session_close():
         sessions: SessionManager = app.config["sessions"]
-        sessions.close()
+        sessions.close(_sid())
         return _render_profile_list()
 
     @app.get("/session/status")
     def session_status():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return jsonify({"open": False})
         ws = sess.watcher.status()
@@ -266,8 +283,7 @@ def create_app() -> Flask:
 
     @app.post("/session/rearm")
     def session_rearm():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         sess.watcher.rearm()
@@ -275,8 +291,7 @@ def create_app() -> Flask:
 
     @app.post("/session/force-prompt")
     def session_force_prompt():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         # Send a CR to make the board print its prompt, then let the watcher
@@ -293,8 +308,7 @@ def create_app() -> Flask:
 
     @app.post("/session/reconnect")
     def session_reconnect():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         try:
@@ -308,8 +322,7 @@ def create_app() -> Flask:
 
     @app.get("/session/stream")
     def session_stream():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         resp = Response(
@@ -337,8 +350,7 @@ def create_app() -> Flask:
         ws_id = id(ws)
         print(f"[ws {ws_id}] OPENED", file=_sys.stderr, flush=True)
 
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             print(f"[ws {ws_id}] no session; sending ERR and closing", file=_sys.stderr, flush=True)
             try:
@@ -444,8 +456,7 @@ def create_app() -> Flask:
     @app.get("/params")
     def params_panel():
         """Show the saved profile params with a 'Push to board' button."""
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         # Pull a fresh profile from disk so edits made via /params/edit
@@ -462,8 +473,7 @@ def create_app() -> Flask:
     @app.get("/params/edit")
     def params_edit():
         """VxWorks edit form. PPCBug is split into NIOT/ENV dialogs."""
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
@@ -495,8 +505,7 @@ def create_app() -> Flask:
 
     def params_edit_section(section: str):
         """Open the NIOT or ENV edit dialog for the active session."""
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         profile = profiles_mod.get_profile(sess.profile.name) or sess.profile
@@ -547,8 +556,7 @@ def create_app() -> Flask:
 
     def _ppcbug_section_push(section: str):
         """Save form values for one PPCBug section, push, verify."""
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         ws = sess.watcher.status()
@@ -565,7 +573,7 @@ def create_app() -> Flask:
             sess.profile, section, request.form
         )
 
-        lock: threading.Lock = app.config["push_lock"]
+        lock: threading.Lock = sess.push_lock
         if not lock.acquire(blocking=False):
             return _error("another push is already in progress"), 409
 
@@ -581,8 +589,8 @@ def create_app() -> Flask:
         profile = sess.profile
         values_to_push = new_section_values
 
-        job = app.config["push_job"]
-        job_lock: threading.Lock = app.config["push_job_lock"]
+        job = sess.push_job
+        job_lock: threading.Lock = sess.push_job_lock
         with job_lock:
             job["id"] += 1
             job["state"] = "running"
@@ -638,8 +646,7 @@ def create_app() -> Flask:
         panel) and by the home-page section save forms (returns the
         profile list).
         """
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         if sess.profile.loader_hint != "ppcbug":
@@ -689,8 +696,7 @@ def create_app() -> Flask:
         PPCBug uses the split NIOT/ENV push routes instead, so its push
         button is on the action bar via /params/push/niot|env.
         """
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         ws = sess.watcher.status()
@@ -703,7 +709,7 @@ def create_app() -> Flask:
         if driver is None:
             return _error(f"no driver for loader {loader!r}"), 400
 
-        lock: threading.Lock = app.config["push_lock"]
+        lock: threading.Lock = sess.push_lock
         if not lock.acquire(blocking=False):
             return _error("another push is already in progress"), 409
 
@@ -712,8 +718,8 @@ def create_app() -> Flask:
         transport = sess.transport
         profile = sess.profile
 
-        job = app.config["push_job"]
-        job_lock: threading.Lock = app.config["push_job_lock"]
+        job = sess.push_job
+        job_lock: threading.Lock = sess.push_job_lock
         with job_lock:
             job["id"] += 1
             job["state"] = "running"
@@ -762,8 +768,11 @@ def create_app() -> Flask:
         """Return the latest push job state. While running, returns a
         "still running" snippet for hx-swap; when done, returns the
         verify panel; on error, returns an error snippet."""
-        job = app.config["push_job"]
-        job_lock: threading.Lock = app.config["push_job_lock"]
+        sess = _current_session()
+        if sess is None:
+            return _error("no session open"), 404
+        job = sess.push_job
+        job_lock: threading.Lock = sess.push_job_lock
         with job_lock:
             state = job["state"]
             html = job["verify_html"]
@@ -771,24 +780,20 @@ def create_app() -> Flask:
         if state == "done":
             return html
         if state == "error":
-            sess = app.config["sessions"].current()
-            return f'<div class="error">push failed: {err}</div>' + render_template(
+            return f'<div class="error">push failed: {escape(err)}</div>' + render_template(
                 "_params_actions.html",
-                profile=(sess.profile if sess else None),
+                profile=sess.profile,
             )
         # running or idle: keep showing the running panel; client polls.
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
         return render_template(
             "_params_running.html",
-            profile=(sess.profile if sess else None),
+            profile=sess.profile,
         )
 
     @app.get("/params/diag")
     def params_diag_form():
         """Show the diag-command picker dialog."""
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         loader = sess.watcher.status().loader or sess.profile.loader_hint
@@ -808,8 +813,7 @@ def create_app() -> Flask:
         Sends SD -> each selected command -> SD. Output is live in the
         terminal; this route returns a small status panel.
         """
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         loader = sess.watcher.status().loader or sess.profile.loader_hint
@@ -823,7 +827,7 @@ def create_app() -> Flask:
         if not enabled:
             return _error("no diag commands selected; tick at least one box"), 400
 
-        lock: threading.Lock = app.config["push_lock"]
+        lock: threading.Lock = sess.push_lock
         if not lock.acquire(blocking=False):
             return _error("another push is already in progress"), 409
         transport = sess.transport
@@ -850,8 +854,7 @@ def create_app() -> Flask:
         garbage values mean a corrupt block that needs repair; sane
         values let the user spot which fields actually need editing.
         """
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         ws = sess.watcher.status()
@@ -861,7 +864,7 @@ def create_app() -> Flask:
 
         current: dict[str, str] = {}
         read_error = ""
-        lock: threading.Lock = app.config["push_lock"]
+        lock: threading.Lock = sess.push_lock
         if lock.acquire(blocking=False):
             try:
                 result = ppcbug_mod.read_cnfg(sess.transport)
@@ -890,8 +893,7 @@ def create_app() -> Flask:
     def params_cnfg_run():
         """Kick off `CNFG;M` in a background thread. Values come from the
         form and are NOT saved to the profile -- VPD is per-board."""
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         ws = sess.watcher.status()
@@ -910,14 +912,14 @@ def create_app() -> Flask:
         if not values:
             return _error("nothing to write; fill in at least one field"), 400
 
-        lock: threading.Lock = app.config["push_lock"]
+        lock: threading.Lock = sess.push_lock
         if not lock.acquire(blocking=False):
             return _error("another push is already in progress"), 409
         transport = sess.transport
         profile = sess.profile
 
-        job = app.config["cnfg_job"]
-        job_lock: threading.Lock = app.config["cnfg_job_lock"]
+        job = sess.cnfg_job
+        job_lock: threading.Lock = sess.cnfg_job_lock
         with job_lock:
             job["id"] += 1
             job["state"] = "running"
@@ -953,8 +955,11 @@ def create_app() -> Flask:
 
     @app.get("/params/cnfg/status")
     def params_cnfg_status():
-        job = app.config["cnfg_job"]
-        job_lock: threading.Lock = app.config["cnfg_job_lock"]
+        sess = _current_session()
+        if sess is None:
+            return _error("no session open"), 404
+        job = sess.cnfg_job
+        job_lock: threading.Lock = sess.cnfg_job_lock
         with job_lock:
             state = job["state"]
             html = job["done_html"]
@@ -962,22 +967,18 @@ def create_app() -> Flask:
         if state == "done":
             return html
         if state == "error":
-            sess = app.config["sessions"].current()
-            return f'<div class="error">CNFG;M failed: {err}</div>' + render_template(
+            return f'<div class="error">CNFG;M failed: {escape(err)}</div>' + render_template(
                 "_params_actions.html",
-                profile=(sess.profile if sess else None),
+                profile=sess.profile,
             )
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
         return render_template(
             "_params_cnfg_running.html",
-            profile=(sess.profile if sess else None),
+            profile=sess.profile,
         )
 
     @app.post("/params/boot")
     def params_boot():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         loader = sess.watcher.status().loader or sess.profile.loader_hint
@@ -998,8 +999,7 @@ def create_app() -> Flask:
 
     @app.post("/session/send")
     def session_send():
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         raw = request.form.get("data", "")
@@ -1021,8 +1021,7 @@ def create_app() -> Flask:
         """
         import base64
 
-        sessions: SessionManager = app.config["sessions"]
-        sess = sessions.current()
+        sess = _current_session()
         if sess is None:
             return _error("no session open"), 404
         b64 = request.form.get("b", "")

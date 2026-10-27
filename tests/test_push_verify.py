@@ -15,6 +15,7 @@ from unittest import mock
 from bootsmith import vxworks as vxworks_mod
 from bootsmith.app import create_app
 from bootsmith.profiles import Profile, TerminalServer
+from bootsmith.session import Session
 
 PARAMS = {
     "boot_device": "ei",
@@ -34,14 +35,15 @@ class PushVerifyTests(unittest.TestCase):
             terminal_servers=[TerminalServer(name="production", host="10.2.2.86", port=10003)],
             boot_params=boot_params,
         )
-        sess = SimpleNamespace(
+        sess = Session(
             profile=profile,
+            terminal_server=profile.terminal_servers[0],
             transport=object(),
             watcher=SimpleNamespace(
                 status=lambda: SimpleNamespace(state="at_prompt", loader="vxworks")
             ),
         )
-        app.config["sessions"].current = lambda: sess
+        app.config["sessions"].current = lambda sid: sess
         client = app.test_client()
         with mock.patch.object(
             vxworks_mod,
@@ -54,10 +56,10 @@ class PushVerifyTests(unittest.TestCase):
         ):
             self.assertEqual(client.post("/params/push").status_code, 200)
             for _ in range(100):
-                if app.config["push_job"]["state"] != "running":
+                if sess.push_job["state"] != "running":
                     break
                 time.sleep(0.02)
-        self.assertEqual(app.config["push_job"]["state"], "done")
+        self.assertEqual(sess.push_job["state"], "done")
         return client.get("/params/push/status").get_data(as_text=True)
 
     def test_field_missing_from_board_is_not_flagged(self):
