@@ -724,9 +724,14 @@ def create_app() -> Flask:
 
         def _runner():
             try:
-                driver.write_params(transport, values)
+                result = driver.write_params(transport, values)
                 verify = driver.read_params(transport)
-                diff = _diff_section(fields, values, verify.params, loader=loader)
+                # Only check fields the dialogue actually prompted for. A
+                # profile can carry fields this board's boot ROM doesn't have
+                # (e.g. unit_number on mv167), which would otherwise always
+                # read back blank and be flagged as a failed write.
+                written = {k: values[k] for k in result.fields_written if k in values}
+                diff = _diff_section(fields, written, verify.params, loader=loader)
                 with app.app_context():
                     html = render_template(
                         "_params_verify.html",
