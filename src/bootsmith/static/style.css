@@ -322,4 +322,5 @@ button.danger {
    request is in flight; the indicator span is hidden otherwise. */
 .connecting { color: var(--muted); font-size: 0.85rem; margin-left: 0.5rem; }
 button:disabled { opacity: 0.6; cursor: progress; }
+.cancel-connect { margin-left: 0.5rem; }
 #flash:empty { display: none; }

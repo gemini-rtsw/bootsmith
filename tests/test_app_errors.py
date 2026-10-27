@@ -61,6 +61,14 @@ class ConnectFeedbackTests(unittest.TestCase):
         self.assertIn("htmx:responseError", body)
         self.assertIn('hx-disabled-elt="find button"', body)
         self.assertIn("Connecting&hellip;", body)
+        self.assertIn("bsCancelConnect", body)
+        self.assertIn('class="cancel-connect"', body)
+
+    def test_single_terminal_server_still_uses_dropdown(self):
+        body = self.client.get("/").get_data(as_text=True)
+        # The name button only toggles the list; the connect form is inside it.
+        self.assertIn("connect-choice-MCS", body)
+        self.assertIn("production (10.1.5.85:2308)", body)
 
 
 if __name__ == "__main__":

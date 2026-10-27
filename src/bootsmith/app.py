@@ -14,12 +14,14 @@ from . import ppcbug as ppcbug_mod
 from . import profiles as profiles_mod
 from . import schemas as schemas_mod
 from . import vxworks as vxworks_mod
-from .session import PortInUseError, SessionManager
+from .session import ConnectCancelled, PortInUseError, SessionManager
 
 # Browser identity for multi-session support: each browser gets a random
 # id cookie and its own session (WTI connection, push/CNFG jobs).
 SID_COOKIE = "bootsmith_sid"
 _SID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")
+TAB_HEADER = "X-Bootsmith-Tab"
+_TAB_RE = re.compile(r"[A-Za-z0-9_-]{8,64}")
 
 
 def _driver_for(loader: str):
@@ -59,19 +61,29 @@ def _render_profile_list(saved_profile: str = "", saved_section: str = ""):
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    # One session per browser, keyed by the SID_COOKIE cookie. Push/CNFG
+    # One session per browser tab, keyed by _sid(). Push/CNFG
     # job state and the push lock live on each Session (see session.py).
     app.config["sessions"] = SessionManager()
     sock = Sock(app)
 
     def _sid() -> str:
+        """Session key: the browser cookie plus the page's tab id.
+
+        Tabs of one browser share the cookie, so the page also sends a
+        per-tab id (TAB_HEADER, or ?tab= where a header can't be set, as
+        with EventSource). Without it two tabs would be one session and
+        the second Connect would replace the first tab's connection.
+        """
         sid = g.get("bootsmith_sid")
         if sid:
             return sid
-        sid = request.cookies.get(SID_COOKIE, "")
-        if not _SID_RE.fullmatch(sid):
-            sid = secrets.token_urlsafe(24)
+        cookie = request.cookies.get(SID_COOKIE, "")
+        if not _SID_RE.fullmatch(cookie):
+            cookie = secrets.token_urlsafe(24)
             g.bootsmith_new_sid = True
+        g.bootsmith_cookie = cookie
+        tab = request.headers.get(TAB_HEADER) or request.args.get("tab", "")
+        sid = f"{cookie}.{tab}" if _TAB_RE.fullmatch(tab) else cookie
         g.bootsmith_sid = sid
         return sid
 
@@ -85,7 +97,7 @@ def create_app() -> Flask:
     @app.after_request
     def _set_sid_cookie(resp):
         if g.get("bootsmith_new_sid"):
-            resp.set_cookie(SID_COOKIE, g.bootsmith_sid, httponly=True, samesite="Lax")
+            resp.set_cookie(SID_COOKIE, g.bootsmith_cookie, httponly=True, samesite="Lax")
         return resp
 
     # Free the WTI ports of browsers that went away (closed tab, crash).
@@ -245,6 +257,8 @@ def create_app() -> Flask:
             sessions.open(_sid(), profile, terminal_server)
         except PortInUseError as e:
             return _error(str(e)), 409
+        except ConnectCancelled as e:
+            return _error(str(e)), 409
         except Exception as e:
             print(
                 f"[session/open] failed for {name!r} -> "
@@ -256,6 +270,12 @@ def create_app() -> Flask:
         return render_template(
             "_session.html", profile=profile, terminal_server=terminal_server
         )
+
+    @app.post("/session/cancel")
+    def session_cancel():
+        sessions: SessionManager = app.config["sessions"]
+        sessions.cancel_connect(_sid())
+        return "", 204
 
     @app.post("/session/close")
     def session_close():
