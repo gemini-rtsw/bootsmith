@@ -14,12 +14,14 @@
                 {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
               </span>
             {% else %}
-              <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML" class="inline">
+              <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
+                    hx-disabled-elt="find button" class="inline">
                 <input type="hidden" name="name" value="{{ p.name }}">
                 {% if p.terminal_servers %}
                   <input type="hidden" name="terminal_server" value="{{ p.terminal_servers[0].name }}">
                 {% endif %}
                 <button type="submit" class="primary">{{ p.name }}</button>
+                <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)</span>
               </form>
               <span class="meta">
                 {% if p.terminal_servers %}{{ p.terminal_servers[0].host }}:{{ p.terminal_servers[0].port }} &mdash;{% endif %}
@@ -46,10 +48,12 @@
           {% if p.terminal_servers|length > 1 %}
             <div id="connect-choice-{{ p.name }}" class="connect-choice hidden">
               {% for ts in p.terminal_servers %}
-                <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML" class="inline">
+                <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
+                      hx-disabled-elt="find button" class="inline">
                   <input type="hidden" name="name" value="{{ p.name }}">
                   <input type="hidden" name="terminal_server" value="{{ ts.name }}">
                   <button type="submit">{{ ts.name }} ({{ ts.host }}:{{ ts.port }})</button>
+                  <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)</span>
                 </form>
               {% endfor %}
             </div>
