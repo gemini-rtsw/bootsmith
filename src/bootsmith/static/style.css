@@ -317,3 +317,9 @@ button.danger {
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
 }
+
+/* Connect feedback: htmx toggles .htmx-request on the form while the
+   request is in flight; the indicator span is hidden otherwise. */
+.connecting { color: var(--muted); font-size: 0.85rem; margin-left: 0.5rem; }
+button:disabled { opacity: 0.6; cursor: progress; }
+#flash:empty { display: none; }

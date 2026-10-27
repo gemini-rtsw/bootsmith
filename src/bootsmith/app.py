@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from flask_sock import Sock
+from markupsafe import escape
 
 from . import ppcbug as ppcbug_mod
 from . import profiles as profiles_mod
@@ -1113,8 +1114,10 @@ def _diff_section(fields, wrote: dict[str, str], got: dict[str, str], loader: st
 
 
 def _error(msg: str) -> Response:
+    # The page shows this HTML in its error banner, and msg can carry
+    # profile names, hostnames and exception text, so escape it.
     return Response(
-        f'<div class="error">{msg}</div>',
+        f'<div class="error">{escape(msg)}</div>',
         status=400,
         content_type="text/html; charset=utf-8",
     )

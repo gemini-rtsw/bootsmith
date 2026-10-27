@@ -13,6 +13,8 @@
     <p class="tagline">VME boot-parameter editor over WTI serial</p>
   </header>
 
+  <div id="flash" role="alert" aria-live="assertive"></div>
+
   <main id="main">
     {% include "_profile_list.html" %}
   </main>
@@ -252,6 +254,41 @@
 
       document.addEventListener("DOMContentLoaded", reconcile);
       document.body.addEventListener("htmx:afterSwap", reconcile);
+    })();
+
+    // htmx does not swap 4xx/5xx responses, so without this a failed
+    // request (e.g. Connect to a busy WTI port) shows nothing at all.
+    // Put the server's error HTML in the #flash banner instead. Errors
+    // come from _error(), which escapes the message.
+    (function () {
+      const flash = document.getElementById("flash");
+
+      function show(html) {
+        flash.innerHTML = html;
+        flash.scrollIntoView({ block: "nearest" });
+      }
+
+      document.body.addEventListener("htmx:beforeRequest", () => {
+        flash.innerHTML = "";
+      });
+      document.body.addEventListener("htmx:responseError", (evt) => {
+        const xhr = evt.detail.xhr;
+        const body = (xhr.responseText || "").trim();
+        if (body.startsWith('<div class="error">')) {
+          show(body);
+        } else {
+          const div = document.createElement("div");
+          div.className = "error";
+          div.textContent = `Request failed (HTTP ${xhr.status}).`;
+          flash.replaceChildren(div);
+        }
+      });
+      document.body.addEventListener("htmx:sendError", () => {
+        const div = document.createElement("div");
+        div.className = "error";
+        div.textContent = "Could not reach the Bootsmith server.";
+        flash.replaceChildren(div);
+      });
     })();
   </script>
 </body>
