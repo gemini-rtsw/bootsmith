@@ -207,6 +207,12 @@
           stateEl.className = "state-pill state-closed";
           return;
         }
+        const shared = document.getElementById("status-shared");
+        if (shared) {
+          const others = (j.viewers || 1) - 1;
+          shared.textContent = others > 0
+            ? "shared with " + others + " other tab" + (others > 1 ? "s" : "") : "";
+        }
         const transportDead = j.transport && j.transport.connected === false;
         if (transportDead) {
           stateEl.textContent = "WTI DROPPED — Reconnect";

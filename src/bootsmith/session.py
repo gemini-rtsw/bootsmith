@@ -58,7 +58,7 @@ class Session:
 
 
 class PortInUseError(ConnectionError):
-    """The WTI port is already held by another browser's session."""
+    """Another browser is still connecting to the WTI port."""
 
 
 class ConnectCancelled(ConnectionError):
@@ -66,11 +66,16 @@ class ConnectCancelled(ConnectionError):
 
 
 class SessionManager:
-    """Holds one session per browser, keyed by a session id (cookie).
+    """Holds one session per browser tab, keyed by a session id.
 
-    A WTI port accepts one client, so a port can belong to only one
-    session at a time; a second browser asking for it gets PortInUseError
-    instead of knocking the first one off.
+    A WTI port accepts one client, so bootsmith holds one connection per
+    port and shares it: a second tab or browser that connects to a port
+    already open elsewhere joins that connection instead of being refused.
+    Every viewer sees the same terminal output and can type into it, like
+    a shared screen session. Each viewer keeps its own profile and its own
+    push/CNFG job panels; the push lock is shared so two viewers can never
+    run two dialogue walks on the line at once. The connection closes when
+    its last viewer disconnects or goes idle.
     """
 
     def __init__(self, idle_timeout: float = IDLE_TIMEOUT_S) -> None:
@@ -95,35 +100,58 @@ class SessionManager:
         with self._lock:
             return dict(self._sessions)
 
-    def _owner_of(self, key: tuple[str, int]) -> tuple[str, Session | None] | None:
-        """Caller holds self._lock."""
-        for sid, sess in self._sessions.items():
-            if (sess.terminal_server.host, sess.terminal_server.port) == key:
-                return sid, sess
-        if key in self._connecting:
-            return self._connecting[key], None
+    def viewers(self, sess: Session) -> int:
+        """Number of tabs/browsers sharing this session's connection."""
+        with self._lock:
+            return sum(1 for s in self._sessions.values() if s.transport is sess.transport)
+
+    def _other_on(self, key: tuple[str, int], sid: str) -> Session | None:
+        """A session of another viewer on this port. Caller holds self._lock."""
+        for other_sid, sess in self._sessions.items():
+            if other_sid != sid and (sess.terminal_server.host, sess.terminal_server.port) == key:
+                return sess
         return None
+
+    def _release(self, sess: Session) -> None:
+        """Close sess's connection unless another viewer still uses it.
+        Call after removing sess from self._sessions."""
+        with self._lock:
+            shared = any(s.transport is sess.transport for s in self._sessions.values())
+        if not shared:
+            sess.watcher.stop()
+            sess.transport.close()
 
     def open(self, sid: str, profile: Profile, terminal_server: TerminalServer) -> Session:
         self.reap_idle()
         key = (terminal_server.host, terminal_server.port)
         with self._lock:
-            owner = self._owner_of(key)
-            if owner is not None and owner[0] != sid:
-                other = owner[1]
-                if other is None:
-                    raise PortInUseError(
-                        f"{key[0]}:{key[1]} is being connected in another tab or browser"
-                    )
-                raise PortInUseError(
-                    f"{key[0]}:{key[1]} is in use by another tab or browser "
-                    f"({other.profile.name}, connected at "
-                    f"{time.strftime('%H:%M', time.localtime(other.opened_at))}). "
-                    "Disconnect it there first."
+            other = self._other_on(key, sid)
+            if other is not None:
+                # Join the open connection rather than refuse or steal it.
+                mine = self._sessions.pop(sid, None)
+                sess = Session(
+                    profile=profile,
+                    terminal_server=terminal_server,
+                    transport=other.transport,
+                    watcher=other.watcher,
+                    push_lock=other.push_lock,
                 )
-            self._connecting[key] = sid
-            cancel = threading.Event()
-            self._cancels[sid] = cancel
+                self._sessions[sid] = sess
+            else:
+                mine = None
+                connecting = self._connecting.get(key)
+                if connecting is not None and connecting != sid:
+                    raise PortInUseError(
+                        f"{key[0]}:{key[1]} is being connected in another tab or browser; "
+                        "try again in a few seconds"
+                    )
+                self._connecting[key] = sid
+                cancel = threading.Event()
+                self._cancels[sid] = cancel
+        if other is not None:
+            if mine is not None:
+                self._release(mine)
+            return sess
         try:
             # If this browser already has a session, close it cleanly first
             # so we don't leak a TCP socket every time the user clicks a
@@ -216,11 +244,11 @@ class SessionManager:
         )
 
     def close(self, sid: str) -> None:
+        """Detach this viewer; the connection closes with its last viewer."""
         with self._lock:
             sess = self._sessions.pop(sid, None)
         if sess is not None:
-            sess.watcher.stop()
-            sess.transport.close()
+            self._release(sess)
 
     def reap_idle(self) -> list[str]:
         """Close sessions whose browser has gone quiet. Never reaps a
