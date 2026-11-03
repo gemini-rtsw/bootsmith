@@ -64,12 +64,14 @@ class ConnectFeedbackTests(unittest.TestCase):
         self.assertIn("bsCancelConnect", body)
         self.assertIn('class="cancel-connect"', body)
 
-    def test_single_terminal_server_still_uses_dropdown(self):
+    def test_list_is_system_then_connection_then_preset(self):
         body = self.client.get("/").get_data(as_text=True)
-        # The name button only toggles the list; the connect form is inside it.
-        self.assertIn("connect-choice-MCS", body)
-        self.assertIn("production (10.1.5.85:2308)", body)
-
+        # MCS is the system, its WTI port the connection, and the preset
+        # button under it is the connect form.
+        self.assertIn('<details class="system"', body)
+        self.assertIn("<strong>MCS</strong>", body)
+        self.assertIn("10.1.5.85:2308", body)
+        self.assertIn('name="terminal_server" value="production"', body)
 
 if __name__ == "__main__":
     unittest.main()

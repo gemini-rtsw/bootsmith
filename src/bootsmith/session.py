@@ -105,6 +105,38 @@ class SessionManager:
         with self._lock:
             return sum(1 for s in self._sessions.values() if s.transport is sess.transport)
 
+    def port_viewers(self) -> dict[tuple[str, int], int]:
+        """Viewer count per open port, for the target list."""
+        with self._lock:
+            out: dict[tuple[str, int], int] = {}
+            for sess in self._sessions.values():
+                key = (sess.terminal_server.host, sess.terminal_server.port)
+                out[key] = out.get(key, 0) + 1
+            return out
+
+    def set_profile(self, sid: str, profile: Profile) -> Session:
+        """Switch this viewer to another preset on the same connection.
+
+        The connection is the board, so a different preset only changes
+        what this tab views and writes; the WTI line, watcher and other
+        viewers are untouched. The preset must list this port.
+        """
+        with self._lock:
+            sess = self._sessions.get(sid)
+            if sess is None:
+                raise LookupError("no session open")
+            key = (sess.terminal_server.host, sess.terminal_server.port)
+            ts = next(
+                (t for t in profile.terminal_servers if (t.host, t.port) == key), None
+            )
+            if ts is None:
+                raise ValueError(
+                    f"preset {profile.name} does not use {key[0]}:{key[1]}"
+                )
+            sess.profile = profile
+            sess.terminal_server = ts
+            return sess
+
     def _other_on(self, key: tuple[str, int], sid: str) -> Session | None:
         """A session of another viewer on this port. Caller holds self._lock."""
         for other_sid, sess in self._sessions.items():

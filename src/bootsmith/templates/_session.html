@@ -1,8 +1,20 @@
 <section class="session" data-profile="{{ profile.name }}">
   {% set boot_label = "Boot (NBO)" if profile.loader_hint == "ppcbug" else "Boot (@)" %}
   <div class="session-header">
-    <h2>{{ profile.name }}</h2>
+    <h2>{{ system }}</h2>
     <span class="meta">{{ terminal_server.name }} &mdash; {{ terminal_server.host }}:{{ terminal_server.port }}</span>
+    {# The preset is what this tab views and writes; switching it keeps
+       the connection (and any other viewers) as they are. #}
+    <form hx-post="/session/preset" hx-target="#main" hx-swap="innerHTML"
+          hx-trigger="change" class="inline preset-select">
+      <label>Preset
+        <select name="name">
+          {% for p in presets %}
+            <option value="{{ p.name }}" {% if p.name == profile.name %}selected{% endif %}>{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
     <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML" class="inline">
       <button type="submit" class="primary">{{ boot_label }}</button>
     </form>

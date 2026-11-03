@@ -1,154 +1,185 @@
 {% from "_profile_form_fields.html" import boot_param_fields, terminal_server_rows %}
 <section class="profiles">
-  <h2>Targets</h2>
-  {% if profiles %}
-    <ul class="profile-list">
-      {% for p in profiles %}
-        <li>
-          <div class="row">
-            {# Connect always opens the list of terminal servers, even when
-               there is only one, so the control works the same everywhere. #}
-            <button type="button" class="primary"
-                    onclick="document.getElementById('connect-choice-{{ p.name }}').classList.toggle('hidden')">{{ p.name }} &#9662;</button>
-            <span class="meta">
-              {% if p.terminal_servers|length == 1 %}{{ p.terminal_servers[0].host }}:{{ p.terminal_servers[0].port }}{% else %}{{ p.terminal_servers|length }} terminal servers{% endif %} &mdash;
-              {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
-            </span>
-            <button type="button"
-                    class="edit-toggle"
-                    onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
-            <form hx-post="/profiles/{{ p.name }}/duplicate"
-                  hx-target="#main"
-                  hx-swap="innerHTML"
-                  class="inline">
-              <button type="submit" class="edit-toggle">Duplicate</button>
-            </form>
-            <form hx-post="/profiles/{{ p.name }}/delete"
-                  hx-target="#main"
-                  hx-swap="innerHTML"
-                  hx-confirm="Delete profile {{ p.name }}?"
-                  class="inline">
-              <button type="submit" class="danger">Delete</button>
-            </form>
+  <h2>Systems</h2>
+  {# System -> connection -> preset. The system comes from the preset
+     name (MKO-PROD-GNIRSCC-new-bootserver -> GNIRSCC, see
+     profiles.system_name); a connection is one WTI port of that system;
+     each preset button under it connects to that port with that preset.
+     Presets can be switched after connecting, from the session header. #}
+  {% if systems %}
+    {% for sys in systems %}
+      {% set sys_names = sys.presets|map(attribute="name")|list %}
+      {% set ns = namespace(viewers=0) %}
+      {% for c in sys.connections %}{% set ns.viewers = ns.viewers + port_viewers.get((c.host, c.port), 0) %}{% endfor %}
+      <details class="system"{% if (saved_profile and saved_profile in sys_names) or ns.viewers %} open{% endif %}>
+        <summary>
+          <strong>{{ sys.name }}</strong>
+          <span class="meta">
+            {{ sys.connections|length }} connection{{ "" if sys.connections|length == 1 else "s" }},
+            {{ sys.presets|length }} preset{{ "" if sys.presets|length == 1 else "s" }}
+          </span>
+          {% if ns.viewers %}<span class="in-use">&#9679; in use</span>{% endif %}
+        </summary>
+
+        {% for c in sys.connections %}
+          {% set n = port_viewers.get((c.host, c.port), 0) %}
+          <div class="connection">
+            <div class="row">
+              <span class="connection-name">{{ c.name }}</span>
+              <span class="meta">{{ c.host }}:{{ c.port }}</span>
+              {% if n %}<span class="in-use">&#9679; open in {{ n }} tab{{ "" if n == 1 else "s" }}; connecting joins it</span>{% endif %}
+            </div>
+            <div class="preset-buttons">
+              {% for p, ts_name in c.presets %}
+                <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
+                      hx-disabled-elt="find button" class="inline">
+                  <input type="hidden" name="name" value="{{ p.name }}">
+                  <input type="hidden" name="terminal_server" value="{{ ts_name }}">
+                  <button type="submit" class="primary" title="Connect with this preset">{{ p.name }}</button>
+                  <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)
+                    <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)">Cancel</button>
+                  </span>
+                </form>
+              {% endfor %}
+            </div>
           </div>
-          <div id="connect-choice-{{ p.name }}" class="connect-choice hidden">
-            {% for ts in p.terminal_servers %}
-              <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
-                    hx-disabled-elt="find button" class="inline">
-                <input type="hidden" name="name" value="{{ p.name }}">
-                <input type="hidden" name="terminal_server" value="{{ ts.name }}">
-                <button type="submit">{{ ts.name }} ({{ ts.host }}:{{ ts.port }})</button>
-                <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)
-                  <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)">Cancel</button>
+        {% else %}
+          <p class="meta">No connections: use Edit on a preset to add a terminal server.</p>
+        {% endfor %}
+
+        <h4 class="presets-heading">Presets</h4>
+        <ul class="profile-list">
+          {% for p in sys.presets %}
+            <li>
+              <div class="row">
+                <span class="preset-name">{{ p.name }}</span>
+                <span class="meta">
+                  {{ loader_labels.get(p.loader_hint, p.loader_hint) }}
+                  {% if not p.terminal_servers %}&mdash; no terminal servers{% endif %}
                 </span>
-              </form>
-            {% else %}
-              <span class="meta">No terminal servers configured &mdash; use Edit to add one.</span>
-            {% endfor %}
-          </div>
-          {% if p.boot_params %}
-            <details class="params-view">
-              <summary>View params</summary>
-              <pre class="params-text">{% for label, key in schemas.get(p.loader_hint, ()) -%}
+                <button type="button"
+                        class="edit-toggle"
+                        onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
+                <form hx-post="/profiles/{{ p.name }}/duplicate"
+                      hx-target="#main"
+                      hx-swap="innerHTML"
+                      class="inline">
+                  <button type="submit" class="edit-toggle">Duplicate</button>
+                </form>
+                <form hx-post="/profiles/{{ p.name }}/delete"
+                      hx-target="#main"
+                      hx-swap="innerHTML"
+                      hx-confirm="Delete profile {{ p.name }}?"
+                      class="inline">
+                  <button type="submit" class="danger">Delete</button>
+                </form>
+              </div>
+              {% if p.boot_params %}
+                <details class="params-view">
+                  <summary>View params</summary>
+                  <pre class="params-text">{% for label, key in schemas.get(p.loader_hint, ()) -%}
 {% if p.boot_params.get(key) %}{{ label }}: {{ p.boot_params[key] }}
 {% endif %}{%- endfor %}</pre>
-            </details>
-          {% endif %}
-          {% set is_saved = (saved_profile == p.name) %}
-          {% macro saved_badge(section_name) -%}
-            {%- if is_saved and saved_section == section_name -%}
-              <span class="ok" style="padding:0.25rem 0.5rem;">Saved at {{ saved_at }}</span>
-            {%- endif -%}
-          {%- endmacro %}
-          <div id="edit-{{ p.name }}" class="edit-form{% if not is_saved %} hidden{% endif %}">
-            {# Connection (name/host/port/loader). Posts to the existing
-               /update endpoint without any param_* fields, so the
-               boot_params stay untouched. #}
-            <form hx-post="/profiles/{{ p.name }}/update"
-                  hx-target="#main"
-                  hx-swap="innerHTML">
-              <h4>Connection</h4>
-              <div class="row" style="margin-bottom:8px;">
-                <button type="submit" class="primary">Save</button>
-                {{ saved_badge("connection") }}
-                <button type="button"
-                        aria-label="Close"
-                        title="Close"
-                        style="margin-left:auto;"
-                        onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">&times;</button>
-              </div>
-              <div class="grid">
-                <label>Name <input name="new_name" required value="{{ p.name }}"
-                                    pattern="[A-Za-z0-9._-]{1,64}"
-                                    title="letters, digits, dot, underscore, hyphen; max 64 chars"></label>
-                <label>Loader
-                  <select name="loader_hint" required data-edit-loader-select="{{ p.name }}">
-                    {% if p.loader_hint not in loader_labels %}
-                      <option value="" selected disabled>-- choose --</option>
-                    {% endif %}
-                    {% for value, label in loader_labels.items() %}
-                      <option value="{{ value }}" {% if p.loader_hint == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-              </div>
-              <p class="hint" style="margin-top:0.5rem;">
-                Terminal servers &mdash; add one per WTI this config can reach
-                (e.g. "production", "test"). Connect lists them to choose
-                from.
-              </p>
-              {{ terminal_server_rows("edit-ts-" + p.name, p.terminal_servers) }}
-            </form>
-
-            <div id="edit-params-{{ p.name }}" data-edit-params-container>
-              {% if p.loader_hint == "ppcbug" %}
-                <form hx-post="/profiles/{{ p.name }}/save/niot"
-                      hx-target="#main"
-                      hx-swap="innerHTML">
-                  <h4>NIOT</h4>
-                  <div class="row" style="margin-bottom:8px;">
-                    <button type="submit" class="primary">Save NIOT</button>
-                    {{ saved_badge("niot") }}
-                  </div>
-                  {{ boot_param_fields(p.loader_hint, ppcbug_niot_fields, p.boot_params) }}
-                </form>
-                <form hx-post="/profiles/{{ p.name }}/save/env"
-                      hx-target="#main"
-                      hx-swap="innerHTML">
-                  <h4>ENV</h4>
-                  <div class="row" style="margin-bottom:8px;">
-                    <button type="submit" class="primary">Save ENV</button>
-                    {{ saved_badge("env") }}
-                  </div>
-                  {{ boot_param_fields(p.loader_hint, ppcbug_env_fields, p.boot_params) }}
-                </form>
-              {% else %}
+                </details>
+              {% endif %}
+              {% set is_saved = (saved_profile == p.name) %}
+              {% macro saved_badge(section_name) -%}
+                {%- if is_saved and saved_section == section_name -%}
+                  <span class="ok" style="padding:0.25rem 0.5rem;">Saved at {{ saved_at }}</span>
+                {%- endif -%}
+              {%- endmacro %}
+              <div id="edit-{{ p.name }}" class="edit-form{% if not is_saved %} hidden{% endif %}">
+                {# Connection (name/host/port/loader). Posts to the existing
+                   /update endpoint without any param_* fields, so the
+                   boot_params stay untouched. #}
                 <form hx-post="/profiles/{{ p.name }}/update"
                       hx-target="#main"
                       hx-swap="innerHTML">
-                  <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
+                  <h4>Connection</h4>
                   <div class="row" style="margin-bottom:8px;">
                     <button type="submit" class="primary">Save</button>
-                    {{ saved_badge("boot params") }}
+                    {{ saved_badge("connection") }}
+                    <button type="button"
+                            aria-label="Close"
+                            title="Close"
+                            style="margin-left:auto;"
+                            onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">&times;</button>
                   </div>
-                  {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+                  <div class="grid">
+                    <label>Name <input name="new_name" required value="{{ p.name }}"
+                                        pattern="[A-Za-z0-9._-]{1,64}"
+                                        title="letters, digits, dot, underscore, hyphen; max 64 chars"></label>
+                    <label>Loader
+                      <select name="loader_hint" required data-edit-loader-select="{{ p.name }}">
+                        {% if p.loader_hint not in loader_labels %}
+                          <option value="" selected disabled>-- choose --</option>
+                        {% endif %}
+                        {% for value, label in loader_labels.items() %}
+                          <option value="{{ value }}" {% if p.loader_hint == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                      </select>
+                    </label>
+                  </div>
+                  <p class="hint" style="margin-top:0.5rem;">
+                    Terminal servers &mdash; add one per WTI this config can reach
+                    (e.g. "production", "test"). Connect lists them to choose
+                    from.
+                  </p>
+                  {{ terminal_server_rows("edit-ts-" + p.name, p.terminal_servers) }}
                 </form>
-              {% endif %}
-            </div>
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
+
+                <div id="edit-params-{{ p.name }}" data-edit-params-container>
+                  {% if p.loader_hint == "ppcbug" %}
+                    <form hx-post="/profiles/{{ p.name }}/save/niot"
+                          hx-target="#main"
+                          hx-swap="innerHTML">
+                      <h4>NIOT</h4>
+                      <div class="row" style="margin-bottom:8px;">
+                        <button type="submit" class="primary">Save NIOT</button>
+                        {{ saved_badge("niot") }}
+                      </div>
+                      {{ boot_param_fields(p.loader_hint, ppcbug_niot_fields, p.boot_params) }}
+                    </form>
+                    <form hx-post="/profiles/{{ p.name }}/save/env"
+                          hx-target="#main"
+                          hx-swap="innerHTML">
+                      <h4>ENV</h4>
+                      <div class="row" style="margin-bottom:8px;">
+                        <button type="submit" class="primary">Save ENV</button>
+                        {{ saved_badge("env") }}
+                      </div>
+                      {{ boot_param_fields(p.loader_hint, ppcbug_env_fields, p.boot_params) }}
+                    </form>
+                  {% else %}
+                    <form hx-post="/profiles/{{ p.name }}/update"
+                          hx-target="#main"
+                          hx-swap="innerHTML">
+                      <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
+                      <div class="row" style="margin-bottom:8px;">
+                        <button type="submit" class="primary">Save</button>
+                        {{ saved_badge("boot params") }}
+                      </div>
+                      {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
+                    </form>
+                  {% endif %}
+                </div>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endfor %}
   {% else %}
-    <p class="empty">No profiles yet. Add one below.</p>
+    <p class="empty">No presets yet. Add one below.</p>
   {% endif %}
 
   <details class="new-profile">
-    <summary>Add target</summary>
+    <summary>Add preset</summary>
     <form hx-post="/profiles" hx-target="#main" hx-swap="innerHTML" id="new-target-form">
       <h4>Connection</h4>
       <div class="grid">
-        <label>Name <input name="name" required placeholder="MCS"></label>
+        <label>Name <input name="name" required placeholder="MKO-PROD-MCS"
+                           title="The system is taken from the name: MKO-PROD-MCS-test is a preset of MCS"></label>
         <label>Loader
           <select name="loader_hint" required id="new-loader-select">
             <option value="" selected disabled>-- choose --</option>

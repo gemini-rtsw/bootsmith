@@ -142,8 +142,12 @@ PYTHONPATH=src python3.11 -m bootsmith --port 8080
 VME boards typically have a single serial line that is either bound to the running
 EPICS IOC or sitting at the boot loader. Bootsmith does **not** power-cycle the board.
 
-1. Pick (or create) a target profile (e.g. `MCS`).
-2. Bootsmith connects to the WTI port and shows live serial output.
+1. Open a system (e.g. `GNIRSCC`), then under the console port you want, click a
+   preset (e.g. `MKO-PROD-GNIRSCC-new-bootserver`). The preset can be switched
+   from the session header later without reconnecting.
+2. Bootsmith connects to the WTI port and shows live serial output. If the port
+   is already open in another tab or browser, you join that connection: everyone
+   sees the same console and can type.
 3. You reboot the board however you normally do.
 4. Bootsmith watches for the boot banner and spams an abort character during the countdown.
 5. On catch: it auto-detects the loader, reads current parameters, lets you edit, writes back, and verifies.
@@ -151,7 +155,13 @@ EPICS IOC or sitting at the boot loader. Bootsmith does **not** power-cycle the 
 
 ## Profiles
 
-Stored as one JSON file per target, `<name>.json`. The directory is resolved in
+Stored as one JSON file per preset, `<name>.json`. The UI groups presets by
+system, taken from the name: `MKO`/`PROD` prefixes are dropped and the next
+token is the system (`MKO-PROD-GNIRSCC-new-bootserver` and
+`MKO-PROD-GNIRSCC-m2lab` are both `GNIRSCC`), so name new presets that way.
+Within a system, presets that list the same WTI host:port share a connection.
+
+The directory is resolved in
 this order:
 
 1. `BOOTSMITH_PROFILES_DIR` (or `--profiles-dir`) — the container sets this to
