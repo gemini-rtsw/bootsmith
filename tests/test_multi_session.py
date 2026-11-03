@@ -1,4 +1,4 @@
-"""Multiple browsers, one session each.
+"""Multiple browsers, one session each; a port open in two is shared.
 
 Each test client below has its own cookie jar, so it behaves like a
 separate browser. Transport and watcher are faked; no sockets open.
@@ -114,9 +114,6 @@ class MultiSessionTests(unittest.TestCase):
         self.assertEqual(st(tab2)["profile"], "MCS")
         # The stream (EventSource can't send headers) finds its tab by ?tab=.
         self.assertEqual(self.a.get("/session/status?tab=tab2bbbbbbbb").get_json()["profile"], "MCS")
-        # Same board from the other tab is refused, not stolen.
-        self.assertEqual(post(tab2, "GNIRSCC").status_code, 409)
-        self.assertEqual(st(tab1)["profile"], "GNIRSCC")
         # Disconnecting one tab leaves the other.
         self.a.post("/session/close", headers=tab1)
         self.assertFalse(st(tab1)["open"])
@@ -150,13 +147,58 @@ class MultiSessionTests(unittest.TestCase):
         self._open(self.a, "GNIRSCC")
         self.assertFalse(self._status(self.b)["open"])
 
-    def test_port_held_by_other_browser_is_refused(self):
+    def _sess(self, client):
+        # Without a tab id the session key is the browser cookie.
+        return self.sessions.all()[client.get_cookie(SID_COOKIE).value]
+
+    def test_second_browser_joins_open_port(self):
         self._open(self.a, "GNIRSCC")
-        resp = self._open(self.b, "GNIRSCC")
-        self.assertEqual(resp.status_code, 409)
-        self.assertIn("in use by another tab or browser", resp.get_data(as_text=True))
-        # A keeps its connection.
+        self.assertEqual(self._open(self.b, "GNIRSCC").status_code, 200)
+        a, b = self._sess(self.a), self._sess(self.b)
+        # One WTI connection, mirrored to both.
+        self.assertIs(a.transport, b.transport)
+        self.assertIs(a.watcher, b.watcher)
+        self.assertEqual(self._status(self.a)["viewers"], 2)
+        self.assertEqual(self._status(self.b)["viewers"], 2)
+        # The connection survives the first viewer leaving...
+        self.a.post("/session/close")
+        self.assertFalse(self._status(self.a)["open"])
+        self.assertFalse(b.transport.closed)
+        self.assertEqual(self._status(self.b)["viewers"], 1)
+        # ...and closes with the last.
+        self.b.post("/session/close")
+        self.assertTrue(b.transport.closed)
+
+    def test_joining_viewer_keeps_own_profile_and_shares_push_lock(self):
+        profiles_mod.save_profile(Profile(
+            name="GNIRSCC-new", loader_hint="vxworks",
+            terminal_servers=[TerminalServer(name="production", host="10.2.2.86", port=10003)],
+            boot_params={"host_name": "mkotcsbootv2-lv1"},
+        ))
+        self._open(self.a, "GNIRSCC")
+        self._open(self.b, "GNIRSCC-new")
         self.assertEqual(self._status(self.a)["profile"], "GNIRSCC")
+        self.assertEqual(self._status(self.b)["profile"], "GNIRSCC-new")
+        a, b = self._sess(self.a), self._sess(self.b)
+        self.assertIs(a.push_lock, b.push_lock)
+        self.assertIsNot(a.push_job, b.push_job)
+
+    def test_joining_releases_viewers_previous_port(self):
+        self._open(self.a, "GNIRSCC")
+        self._open(self.b, "MCS")
+        mcs = self._sess(self.b).transport
+        self._open(self.b, "GNIRSCC")
+        self.assertTrue(mcs.closed)
+        self.assertEqual(self._status(self.b)["viewers"], 2)
+
+    def test_idle_viewer_is_reaped_without_closing_shared_port(self):
+        self._open(self.a, "GNIRSCC")
+        self._open(self.b, "GNIRSCC")
+        a = self._sess(self.a)
+        a.last_seen -= session_mod.IDLE_TIMEOUT_S + 1
+        self.assertEqual(len(self.sessions.reap_idle()), 1)
+        self.assertFalse(a.transport.closed)
+        self.assertEqual(self._status(self.b)["viewers"], 1)
 
     def test_same_browser_can_reopen_its_own_port(self):
         self._open(self.a, "GNIRSCC")

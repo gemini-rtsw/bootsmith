@@ -297,6 +297,7 @@ def create_app() -> Flask:
                 "loader": ws.loader,
                 "abort_chars_sent": ws.abort_chars_sent,
                 "notes": ws.notes,
+                "viewers": app.config["sessions"].viewers(sess),
                 "transport": asdict(sess.transport.status()),
             }
         )

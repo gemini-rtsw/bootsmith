@@ -123,8 +123,13 @@
         }
         const form = new FormData();
         form.append("b", bytesToB64(buf));
-        fetch("/session/key", { method: "POST", body: form }).catch(() => {});
+        // Chain the POSTs: concurrent requests can reach the board out of
+        // order (a pasted command overtaken by the Enter typed after it).
+        sendChain = sendChain
+          .then(() => fetch("/session/key", { method: "POST", body: form }))
+          .catch(() => {});
       }
+      let sendChain = Promise.resolve();
 
       function openSSE() {
         try {
@@ -181,6 +186,26 @@
           e.preventDefault(); sendBytes(e.key); input.value += e.key; return;
         }
       });
+      // Paste: keydown only sees the paste shortcut, not the characters,
+      // so without this the text lands in the box but never reaches the
+      // board and Enter sends a bare CR. Send it as typed text instead.
+      // Quotes copied from Jira/Confluence arrive curly, which the vxWorks
+      // shell rejects; straighten them. Newlines become CR, so a pasted
+      // line ending in a newline runs like Enter.
+      document.addEventListener("paste", (e) => {
+        const input = document.getElementById("terminal-input");
+        if (!input || document.activeElement !== input) return;
+        e.preventDefault();
+        const text = ((e.clipboardData || window.clipboardData).getData("text") || "")
+          .replace(/[\u201c\u201d\u201e\u2033]/g, '"')
+          .replace(/[\u2018\u2019\u201a\u2032]/g, "'")
+          .replace(/\u00a0/g, " ")
+          .replace(/\r\n?|\n/g, "\r");
+        if (!text) return;
+        sendBytes(text);
+        const lastLine = text.split("\r").pop();
+        input.value = text.includes("\r") ? lastLine : input.value + text;
+      });
       document.addEventListener("click", (e) => {
         if (e.target && e.target.id === "serial") {
           // Don't steal focus if the user just finished a text
@@ -206,6 +231,12 @@
           stateEl.textContent = "closed";
           stateEl.className = "state-pill state-closed";
           return;
+        }
+        const shared = document.getElementById("status-shared");
+        if (shared) {
+          const others = (j.viewers || 1) - 1;
+          shared.textContent = others > 0
+            ? "shared with " + others + " other tab" + (others > 1 ? "s" : "") : "";
         }
         const transportDead = j.transport && j.transport.connected === false;
         if (transportDead) {
