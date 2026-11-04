@@ -59,7 +59,7 @@
                 </span>
                 <button type="button"
                         class="edit-toggle"
-                        onclick="document.getElementById('edit-{{ p.name }}').classList.toggle('hidden')">Edit</button>
+                        onclick="bsOpenModal('edit-{{ p.name }}')">Edit</button>
                 <form hx-post="/profiles/{{ p.name }}/duplicate"
                       hx-target="#main"
                       hx-swap="innerHTML"
@@ -88,7 +88,22 @@
                   <span class="ok" style="padding:0.25rem 0.5rem;">Saved at {{ saved_at }}</span>
                 {%- endif -%}
               {%- endmacro %}
-              <div id="edit-{{ p.name }}" class="edit-form{% if not is_saved %} hidden{% endif %}">
+              {# Edit dialog: a modal over the page so it reads as an input
+                 dialog, not part of the list. Close with the x, Escape or a
+                 click on the backdrop (index.html modal script). #}
+              <div id="edit-{{ p.name }}"
+                   class="modal{% if not is_saved %} hidden{% endif %}"
+                   role="dialog" aria-modal="true" aria-labelledby="edit-title-{{ p.name }}">
+               <div class="modal-panel">
+                <div class="modal-header">
+                  <h3 id="edit-title-{{ p.name }}">Edit preset {{ p.name }}</h3>
+                  <button type="button"
+                          class="modal-close"
+                          data-modal-close
+                          aria-label="Close"
+                          title="Close (Esc)"
+                          onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">&times;</button>
+                </div>
                 {# Connection (name/host/port/loader). Posts to the existing
                    /update endpoint without any param_* fields, so the
                    boot_params stay untouched. #}
@@ -99,11 +114,6 @@
                   <div class="row" style="margin-bottom:8px;">
                     <button type="submit" class="primary">Save</button>
                     {{ saved_badge("connection") }}
-                    <button type="button"
-                            aria-label="Close"
-                            title="Close"
-                            style="margin-left:auto;"
-                            onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">&times;</button>
                   </div>
                   <div class="grid">
                     <label>Name <input name="new_name" required value="{{ p.name }}"
@@ -163,6 +173,7 @@
                     </form>
                   {% endif %}
                 </div>
+               </div>
               </div>
             </li>
           {% endfor %}

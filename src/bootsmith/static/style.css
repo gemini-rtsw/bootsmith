@@ -232,13 +232,39 @@ button.danger {
 }
 .banner.hidden { display: none; }
 
-.edit-form {
-  margin-top: 0.5rem;
-  padding: 0.5rem;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
+/* Edit dialogs (preset edit, session NIOT/ENV/VxWorks edit): a modal
+   over a dimmed page so it is clearly an input dialog. */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5vh 16px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.65);
 }
-.edit-form.hidden { display: none; }
+.modal.hidden { display: none; }
+.modal-panel {
+  width: min(900px, 100%);
+  padding: 1rem 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.modal-header h3 { margin: 0; }
+.modal-close { margin-left: auto; font-size: 1.1rem; line-height: 1; }
+body:has(.modal:not(.hidden)) { overflow: hidden; }
 
 .connect-choice {
   display: flex;
