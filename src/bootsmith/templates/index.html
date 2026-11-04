@@ -25,6 +25,12 @@
       }
       window.addEventListener("pagehide", () => {
         try { sessionStorage.setItem("bootsmith_tab", id); } catch (_) {}
+        // Tell the server this tab is going away, so a closed tab stops
+        // holding the WTI port. A reload comes back within the grace and
+        // keeps it (session.py LEAVE_GRACE_S).
+        try {
+          navigator.sendBeacon("/session/leave?tab=" + encodeURIComponent(id));
+        } catch (_) {}
       });
       return id;
     })();

@@ -334,6 +334,40 @@ class MultiSessionTests(unittest.TestCase):
         # The reaped port is free again.
         self.assertEqual(self._open(self.b, "GNIRSCC").status_code, 200)
 
+    def _leave(self, client):
+        # No tab id in these clients, so the cookie alone is the key.
+        return client.post("/session/leave")
+
+    def test_closed_tab_frees_shared_port_after_grace(self):
+        # Two tabs on one port; one closes, the other disconnects: the
+        # line must close (2026-11-04, GNIRSCC "hunt group busy").
+        self._open(self.a, "GNIRSCC")
+        self._open(self.b, "GNIRSCC")
+        a = self._sess(self.a)
+        a_sid = next(sid for sid, s in self.sessions.all().items() if s is a)
+        self.assertEqual(self._leave(self.a).status_code, 204)
+        a.leaving_at -= session_mod.LEAVE_GRACE_S + 1
+        self.assertEqual(self.sessions.reap_idle(), [a_sid])
+        self.assertEqual(self._status(self.b)["viewers"], 1)
+        self.b.post("/session/close")
+        self.assertTrue(a.transport.closed)
+
+    def test_reload_within_grace_keeps_session(self):
+        self._open(self.a, "GNIRSCC")
+        a = self._sess(self.a)
+        a_sid = next(sid for sid, s in self.sessions.all().items() if s is a)
+        self._leave(self.a)
+        self._status(self.a)  # the reloaded page's first poll
+        self.assertIsNone(a.leaving_at)
+        self.assertEqual(self.sessions.reap_idle(), [])
+
+    def test_leave_is_not_reaped_before_grace(self):
+        self._open(self.a, "GNIRSCC")
+        a = self._sess(self.a)
+        a_sid = next(sid for sid, s in self.sessions.all().items() if s is a)
+        self._leave(self.a)
+        self.assertEqual(self.sessions.reap_idle(), [])
+
     def test_polling_keeps_session_alive(self):
         self._open(self.a, "GNIRSCC")
         sess = next(iter(self.sessions.all().values()))

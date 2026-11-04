@@ -40,7 +40,9 @@ def _driver_for(loader: str):
 VALID_LOADERS = set(schemas_mod.LOADER_LABELS.keys())
 
 
-def _render_profile_list(saved_profile: str = "", saved_section: str = ""):
+def _render_profile_list(
+    saved_profile: str = "", saved_section: str = "", open_system: str = ""
+):
     """Render the home-page profile list.
 
     Pass saved_profile/saved_section so the just-edited form can
@@ -54,6 +56,7 @@ def _render_profile_list(saved_profile: str = "", saved_section: str = ""):
         saved_profile=saved_profile,
         saved_section=saved_section,
         saved_at=time.strftime("%H:%M:%S") if saved_profile else "",
+        open_system=open_system,
     )
 
 
@@ -62,6 +65,7 @@ def _list_context() -> dict:
     profiles = profiles_mod.list_profiles()
     return dict(
         profiles=profiles,
+        system_of=profiles_mod.system_of,
         systems=profiles_mod.group_by_system(profiles),
         port_viewers=current_app.config["sessions"].port_viewers(),
         schemas=schemas_mod.SCHEMAS,
@@ -113,9 +117,11 @@ def create_app() -> Flask:
         return resp
 
     # Free the WTI ports of browsers that went away (closed tab, crash).
+    # Every 5 s so a closed tab (see /session/leave) frees the port within
+    # ~15 s; idle sessions still need IDLE_TIMEOUT_S.
     def _reaper():
         while True:
-            time.sleep(60)
+            time.sleep(5)
             try:
                 app.config["sessions"].reap_idle()
             except Exception:
@@ -131,32 +137,145 @@ def create_app() -> Flask:
     def list_profiles_route():
         return _render_profile_list()
 
-    @app.post("/profiles")
-    def create_profile():
-        name = (request.form.get("name") or "").strip()
-        loader_hint = (request.form.get("loader_hint") or "").strip()
+    def _system_or_404(system: str):
+        system = (system or "").strip().upper()
+        if not profiles_mod.system_exists(system):
+            return None, (_error(f"no such system: {system!r}"), 404)
+        return system, None
+
+    def _system_connections(system: str) -> dict[str, profiles_mod.TerminalServer]:
+        """The system's connections keyed "host:port", named as the list shows them."""
+        groups = [g for g in profiles_mod.group_by_system(profiles_mod.list_profiles())
+                  if g.name == system]
+        out: dict[str, profiles_mod.TerminalServer] = {}
+        for c in (groups[0].connections if groups else []):
+            out[f"{c.host}:{c.port}"] = profiles_mod.TerminalServer(c.name, c.host, c.port)
+        return out
+
+    def _used_on(form, system: str) -> list[profiles_mod.TerminalServer]:
+        """The ticked "Used on" connections of a preset form, in list order."""
+        conns = _system_connections(system)
+        picked = set(form.getlist("used_on"))
+        unknown = picked - set(conns)
+        if unknown:
+            raise ValueError(f"not connections of {system}: {', '.join(sorted(unknown))}")
+        out = [ts for key, ts in conns.items() if key in picked]
+        if not out:
+            raise ValueError("tick at least one connection this preset is used on")
+        return out
+
+    def _new_preset(name: str, system: str, loader_hint: str, terminal_servers, form):
         if not name:
             return _error("name is required"), 400
+        if not profiles_mod._NAME_RE.match(name):
+            return _error("preset name: letters, digits, '.', '_' or '-', max 64"), 400
         if loader_hint not in VALID_LOADERS:
             return _error(
                 f"loader is required; pick one of {sorted(VALID_LOADERS)}"
             ), 400
+        if profiles_mod.get_profile(name) is not None:
+            return _error(f"preset {name!r} already exists"), 409
+        profile = profiles_mod.Profile(
+            name=name,
+            system=system,
+            terminal_servers=terminal_servers,
+            loader_hint=loader_hint,
+            boot_params=_collect_boot_params(form, loader_hint),
+        )
+        profiles_mod.save_profile(profile)
+        return _render_profile_list(open_system=system)
+
+    @app.post("/systems")
+    def create_system():
+        """New system: its first preset and first connection in one go."""
+        try:
+            system = profiles_mod.normalize_system(request.form.get("system", ""))
+        except ValueError as e:
+            return _error(str(e)), 400
+        if profiles_mod.system_exists(system):
+            return _error(f"system {system} already exists; add presets inside it"), 409
         try:
             terminal_servers = _collect_terminal_servers(request.form)
         except ValueError as e:
             return _error(str(e)), 400
-        if not terminal_servers:
-            return _error("at least one terminal server is required"), 400
-        if profiles_mod.get_profile(name) is not None:
-            return _error(f"profile {name!r} already exists"), 409
-        profile = profiles_mod.Profile(
-            name=name,
-            terminal_servers=terminal_servers,
-            loader_hint=loader_hint,
-            boot_params=_collect_boot_params(request.form, loader_hint),
+        if len(terminal_servers) != 1:
+            return _error("give the system's first connection: name, host and port"), 400
+        return _new_preset(
+            (request.form.get("name") or "").strip(), system,
+            (request.form.get("loader_hint") or "").strip(), terminal_servers, request.form,
         )
-        profiles_mod.save_profile(profile)
-        return _render_profile_list()
+
+    @app.post("/systems/<system>/presets")
+    def create_system_preset(system: str):
+        system, err = _system_or_404(system)
+        if err:
+            return err
+        try:
+            terminal_servers = _used_on(request.form, system)
+        except ValueError as e:
+            return _error(str(e)), 400
+        return _new_preset(
+            (request.form.get("name") or "").strip(), system,
+            (request.form.get("loader_hint") or "").strip(), terminal_servers, request.form,
+        )
+
+    def _connection_form() -> profiles_mod.TerminalServer:
+        name = (request.form.get("conn_name") or "").strip()
+        host = (request.form.get("conn_host") or "").strip()
+        port = (request.form.get("conn_port") or "").strip()
+        if not name or not host or not port:
+            raise ValueError("a connection needs a name, host and port")
+        try:
+            port_int = int(port)
+        except ValueError:
+            raise ValueError(f"port must be an integer: {port!r}")
+        if not 1 <= port_int <= 65535:
+            raise ValueError(f"port out of range: {port_int}")
+        return profiles_mod.TerminalServer(name, host, port_int)
+
+    def _old_key() -> tuple[str, int]:
+        try:
+            return (request.form["old_host"], int(request.form["old_port"]))
+        except (KeyError, ValueError):
+            raise ValueError("which connection? (old_host/old_port missing)")
+
+    @app.post("/systems/<system>/connections")
+    def create_connection(system: str):
+        system, err = _system_or_404(system)
+        if err:
+            return err
+        try:
+            profiles_mod.set_connection(
+                system, None, _connection_form(), request.form.getlist("used_by")
+            )
+        except ValueError as e:
+            return _error(str(e)), 400
+        return _render_profile_list(open_system=system)
+
+    @app.post("/systems/<system>/connections/update")
+    def update_connection(system: str):
+        system, err = _system_or_404(system)
+        if err:
+            return err
+        try:
+            old = _old_key()
+            profiles_mod.set_connection(
+                system, old, _connection_form(), request.form.getlist("used_by")
+            )
+        except ValueError as e:
+            return _error(str(e)), 400
+        return _render_profile_list(open_system=system)
+
+    @app.post("/systems/<system>/connections/delete")
+    def delete_connection(system: str):
+        system, err = _system_or_404(system)
+        if err:
+            return err
+        try:
+            profiles_mod.delete_connection(system, _old_key())
+        except ValueError as e:
+            return _error(str(e)), 400
+        return _render_profile_list(open_system=system)
 
     @app.post("/profiles/<name>/duplicate")
     def duplicate_profile_route(name: str):
@@ -187,7 +306,16 @@ def create_app() -> Flask:
         # terminal-server rows) was submitted; the NIOT/ENV/boot-params
         # forms post to this same endpoint without it, and must leave the
         # existing terminal servers untouched.
-        if "ts_name" in request.form:
+        # The preset dialog sends its "Used on" checkboxes (and the marker
+        # used_on_sent, since an all-unticked group sends nothing).
+        system = profiles_mod.system_of(existing)
+        existing.system = system
+        if "used_on_sent" in request.form:
+            try:
+                existing.terminal_servers = _used_on(request.form, system)
+            except ValueError as e:
+                return _error(str(e)), 400
+        elif "ts_name" in request.form:
             try:
                 terminal_servers = _collect_terminal_servers(request.form)
             except ValueError as e:
@@ -278,10 +406,10 @@ def create_app() -> Flask:
         """The connected view, with the presets this tab can switch to:
         every preset of the same system that uses this port."""
         key = (sess.terminal_server.host, sess.terminal_server.port)
-        system = profiles_mod.system_name(sess.profile.name)
+        system = profiles_mod.system_of(sess.profile)
         presets = [
             p for p in profiles_mod.list_profiles()
-            if profiles_mod.system_name(p.name) == system
+            if profiles_mod.system_of(p) == system
             and any((t.host, t.port) == key for t in p.terminal_servers)
         ]
         return render_template(
@@ -298,6 +426,12 @@ def create_app() -> Flask:
         profile = profiles_mod.get_profile(name)
         if profile is None:
             return _error(f"no such profile: {name!r}"), 404
+        cur = app.config["sessions"].current(_sid())
+        if cur is not None and profiles_mod.system_of(profile) != profiles_mod.system_of(cur.profile):
+            return _error(
+                f"{profile.name} is a {profiles_mod.system_of(profile)} preset, "
+                f"not {profiles_mod.system_of(cur.profile)}"
+            ), 400
         try:
             sess = app.config["sessions"].set_profile(_sid(), profile)
         except LookupError as e:
@@ -311,6 +445,17 @@ def create_app() -> Flask:
         sessions: SessionManager = app.config["sessions"]
         sessions.cancel_connect(_sid())
         return "", 204
+
+    @app.post("/session/leave")
+    def session_leave():
+        """Beacon from the page's pagehide: this tab is going away.
+
+        Sent with navigator.sendBeacon, which can't set headers, so the
+        tab id comes as ?tab= (see _sid). Not _current_session(): that
+        would count this request as activity and cancel the leave.
+        """
+        app.config["sessions"].leave(_sid())
+        return ("", 204)
 
     @app.post("/session/close")
     def session_close():

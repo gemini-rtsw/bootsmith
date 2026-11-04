@@ -262,14 +262,17 @@ button.danger {
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
 }
-.modal-header h3 { margin: 0; }
-.modal-close { margin-left: auto; font-size: 1.1rem; line-height: 1; }
+.modal-header h3 { margin: 0; margin-right: auto; }
+/* Stays at the top while a long form (PPCBug ENV) scrolls, so the one
+   Save and the close button are always in reach. */
+.modal-header { position: sticky; top: 0; z-index: 1; background: var(--panel); padding-top: 0.5rem; }
+.modal-close { font-size: 1.1rem; line-height: 1; }
 body:has(.modal:not(.hidden)) { overflow: hidden; }
 
 /* Confirm dialog: the crate it acts on comes first, in large type. */
 .confirm-modal { z-index: 110; align-items: center; }
 .confirm-panel { width: min(560px, 100%); border-color: var(--danger); }
-.confirm-kicker { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
+.confirm-kicker { margin-right: auto; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
 .confirm-target {
   padding: 0.75rem 1rem;
   margin-bottom: 0.75rem;
@@ -408,3 +411,18 @@ details.system[open] > summary { margin-bottom: 6px; }
 .preset-buttons .htmx-indicator { display: none; }
 .preset-buttons .htmx-request .htmx-indicator { display: inline; }
 .preset-select label { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; color: var(--muted); }
+
+/* System sections: Connect, Presets, Connections. */
+.systems-header { align-items: center; }
+.section-heading { align-items: center; margin-top: 0.75rem; }
+.section-heading .presets-heading { margin: 0; }
+.checks { display: flex; flex-direction: column; gap: 0.25rem; margin: 0.25rem 0 0.75rem; }
+.check {
+  flex-direction: row; align-items: center; justify-content: flex-start;
+  gap: 0.5rem; font-size: 0.95rem; color: var(--fg); cursor: pointer;
+}
+.check input[type=checkbox] { width: auto; margin: 0; padding: 0; }
+.unset {
+  font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 4px;
+  border: 1px solid #8a6d1f; color: #e8c66a;
+}
