@@ -60,8 +60,8 @@
   </footer>
 
   {# Confirm dialog for the two moments that pick or restart a crate:
-     Connect, and Boot / reboot (the Boot button, a typed `reboot` or
-     `RESET`, Ctrl-X). Once connected, push/diag/CNFG do not ask: the
+     Connect, and Boot / reboot (the Boot button, a typed `reboot`,
+     `exit` or `RESET`, Ctrl-X). Once connected, push/diag/CNFG do not ask: the
      operator has already confirmed which crate this is. Delete preset
      uses it too (it always asked). It
      names the system, preset and console first, in large type, so the
@@ -268,9 +268,10 @@
         bsConfirm(e.detail.question, okEl && okEl.dataset.confirmOk, elt)
           .then((ok) => { if (ok) e.detail.issueRequest(true); });
       });
-      // A terminal line that reboots the crate: vxWorks `reboot`, PPCBug
-      // `RESET`. Ctrl-X (vxWorks reboot key) is checked separately.
-      const REBOOT_LINE = /^\s*(reboot|reset)\b/i;
+      // A terminal line that reboots or ends the crate's shell: vxWorks
+      // `reboot` and `exit`, PPCBug `RESET`. Ctrl-X (vxWorks reboot key)
+      // is checked separately.
+      const REBOOT_LINE = /^\s*(reboot|reset|exit)\b/i;
       const confirmReboot = (how) => bsConfirm(
         "Reboot this crate (" + how + "). Everything it runs stops and its mechanisms lose their index.",
         "Reboot", document.getElementById("terminal-input"));
