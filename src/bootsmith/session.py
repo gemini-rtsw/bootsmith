@@ -13,6 +13,9 @@ from .watcher import BannerWatcher
 # its WTI port is freed. An open page polls /session/status every 2 s, so
 # only a closed or crashed tab gets anywhere near this.
 IDLE_TIMEOUT_S = 10 * 60
+# A tab that sent /session/leave (closed or navigated away) is dropped
+# this long after, unless it makes another request first (a reload).
+LEAVE_GRACE_S = 10
 
 
 def _new_push_job() -> dict:
@@ -47,6 +50,9 @@ class Session:
     log: list[str] = field(default_factory=list)
     opened_at: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
+    # Set by leave() when the tab's page goes away; cleared by any later
+    # request from the tab. reap_idle() drops it after LEAVE_GRACE_S.
+    leaving_at: Optional[float] = None
     # Per-session job state; each board gets its own push/CNFG slot.
     # push_lock serializes push/read-params on this transport so two
     # concurrent clicks never run two dialogue walks against it at once.
@@ -78,7 +84,9 @@ class SessionManager:
     its last viewer disconnects or goes idle.
     """
 
-    def __init__(self, idle_timeout: float = IDLE_TIMEOUT_S) -> None:
+    def __init__(
+        self, idle_timeout: float = IDLE_TIMEOUT_S, leave_grace: float = LEAVE_GRACE_S
+    ) -> None:
         self._lock = threading.Lock()
         self._sessions: dict[str, Session] = {}
         # Ports being connected right now (connect takes seconds), so two
@@ -88,13 +96,30 @@ class SessionManager:
         # cancel_connect() so the retry loop stops and frees the port.
         self._cancels: dict[str, threading.Event] = {}
         self._idle_timeout = idle_timeout
+        self._leave_grace = leave_grace
 
     def current(self, sid: str) -> Session | None:
         with self._lock:
             sess = self._sessions.get(sid)
             if sess is not None:
                 sess.last_seen = time.time()
+                sess.leaving_at = None
             return sess
+
+    def leave(self, sid: str) -> bool:
+        """The tab's page is going away (closed, reload, navigation).
+
+        Marks the viewer leaving; reap_idle() closes it after the grace
+        unless the tab makes another request first. Without this a closed
+        tab kept its share of the WTI port for IDLE_TIMEOUT_S, so the other
+        tab's Disconnect left the line open (2026-11-04).
+        """
+        with self._lock:
+            sess = self._sessions.get(sid)
+            if sess is None:
+                return False
+            sess.leaving_at = time.time()
+            return True
 
     def all(self) -> dict[str, Session]:
         with self._lock:
@@ -285,11 +310,14 @@ class SessionManager:
     def reap_idle(self) -> list[str]:
         """Close sessions whose browser has gone quiet. Never reaps a
         session mid-push, so a slow push can't lose its transport."""
-        cutoff = time.time() - self._idle_timeout
+        now = time.time()
+        cutoff = now - self._idle_timeout
+        left = now - self._leave_grace
         with self._lock:
             stale = [
                 sid for sid, s in self._sessions.items()
-                if s.last_seen < cutoff and not s.push_lock.locked()
+                if (s.last_seen < cutoff or (s.leaving_at is not None and s.leaving_at < left))
+                and not s.push_lock.locked()
             ]
         for sid in stale:
             self.close(sid)

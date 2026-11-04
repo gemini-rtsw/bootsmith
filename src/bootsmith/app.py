@@ -113,9 +113,11 @@ def create_app() -> Flask:
         return resp
 
     # Free the WTI ports of browsers that went away (closed tab, crash).
+    # Every 5 s so a closed tab (see /session/leave) frees the port within
+    # ~15 s; idle sessions still need IDLE_TIMEOUT_S.
     def _reaper():
         while True:
-            time.sleep(60)
+            time.sleep(5)
             try:
                 app.config["sessions"].reap_idle()
             except Exception:
@@ -311,6 +313,17 @@ def create_app() -> Flask:
         sessions: SessionManager = app.config["sessions"]
         sessions.cancel_connect(_sid())
         return "", 204
+
+    @app.post("/session/leave")
+    def session_leave():
+        """Beacon from the page's pagehide: this tab is going away.
+
+        Sent with navigator.sendBeacon, which can't set headers, so the
+        tab id comes as ?tab= (see _sid). Not _current_session(): that
+        would count this request as activity and cancel the leave.
+        """
+        app.config["sessions"].leave(_sid())
+        return ("", 204)
 
     @app.post("/session/close")
     def session_close():
