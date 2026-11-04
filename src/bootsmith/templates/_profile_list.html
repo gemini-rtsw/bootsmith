@@ -29,25 +29,31 @@
               <span class="meta">{{ c.host }}:{{ c.port }}</span>
               {% if n %}<span class="in-use">&#9679; open in {{ n }} tab{{ "" if n == 1 else "s" }}; connecting joins it</span>{% endif %}
             </div>
+            {# One Connect per console. It opens with the console's first
+               preset (the plain MKO-PROD-<system> one sorts first, see
+               profiles.group_by_system); the session header's Preset
+               dropdown switches to the others without reconnecting. #}
+            {% set p0, ts0 = c.presets[0] %}
             <div class="preset-buttons">
-              {% for p, ts_name in c.presets %}
-                <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
-                      hx-disabled-elt="find button" class="inline"
-                      hx-disinherit="hx-confirm"
-
-                      hx-confirm="Open the serial console of this crate.{% if n %} It is already open in {{ n }} tab{{ '' if n == 1 else 's' }}; you will share it and can both type.{% endif %}"
-                      data-confirm-ok="Connect"
-                      data-confirm-system="{{ sys.name }}"
-                      data-confirm-preset="{{ p.name }}"
-                      data-confirm-console="{{ c.name }} &mdash; {{ c.host }}:{{ c.port }}">
-                  <input type="hidden" name="name" value="{{ p.name }}">
-                  <input type="hidden" name="terminal_server" value="{{ ts_name }}">
-                  <button type="submit" class="primary" title="Connect with this preset">{{ p.name }}</button>
-                  <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)
-                    <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)">Cancel</button>
-                  </span>
-                </form>
-              {% endfor %}
+              <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
+                    hx-disabled-elt="find button" class="inline"
+                    hx-disinherit="hx-confirm"
+                    hx-confirm="Open the serial console of this crate.{% if c.presets|length > 1 %} It opens with this preset; switch presets from the session header.{% endif %}{% if n %} It is already open in {{ n }} tab{{ '' if n == 1 else 's' }}; you will share it and can both type.{% endif %}"
+                    data-confirm-ok="Connect"
+                    data-confirm-system="{{ sys.name }}"
+                    data-confirm-preset="{{ p0.name }}"
+                    data-confirm-console="{{ c.name }} &mdash; {{ c.host }}:{{ c.port }}">
+                <input type="hidden" name="name" value="{{ p0.name }}">
+                <input type="hidden" name="terminal_server" value="{{ ts0 }}">
+                <button type="submit" class="primary" title="Connect to {{ c.name }} ({{ c.host }}:{{ c.port }})">Connect</button>
+                <span class="meta">
+                  preset{{ "s" if c.presets|length > 1 else "" }}:
+                  {% for p, _ts in c.presets %}{{ p.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+                </span>
+                <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)
+                  <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)">Cancel</button>
+                </span>
+              </form>
             </div>
           </div>
         {% else %}
