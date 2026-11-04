@@ -266,6 +266,24 @@ button.danger {
 .modal-close { margin-left: auto; font-size: 1.1rem; line-height: 1; }
 body:has(.modal:not(.hidden)) { overflow: hidden; }
 
+/* Confirm dialog: the crate it acts on comes first, in large type. */
+.confirm-modal { z-index: 110; align-items: center; }
+.confirm-panel { width: min(560px, 100%); border-color: var(--danger); }
+.confirm-kicker { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
+.confirm-target {
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.confirm-system { font-size: 2rem; font-weight: 700; letter-spacing: 0.02em; margin-bottom: 0.4rem; }
+.confirm-target dl { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; margin: 0; }
+.confirm-target dt { color: var(--muted); }
+.confirm-target dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.confirm-action { margin: 0 0 1rem; }
+.confirm-buttons { justify-content: flex-end; gap: 0.5rem; }
+
 .connect-choice {
   display: flex;
   gap: 0.5rem;
