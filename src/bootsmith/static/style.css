@@ -262,14 +262,17 @@ button.danger {
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
 }
-.modal-header h3 { margin: 0; }
-.modal-close { margin-left: auto; font-size: 1.1rem; line-height: 1; }
+.modal-header h3 { margin: 0; margin-right: auto; }
+/* Stays at the top while a long form (PPCBug ENV) scrolls, so the one
+   Save and the close button are always in reach. */
+.modal-header { position: sticky; top: 0; z-index: 1; background: var(--panel); padding-top: 0.5rem; }
+.modal-close { font-size: 1.1rem; line-height: 1; }
 body:has(.modal:not(.hidden)) { overflow: hidden; }
 
 /* Confirm dialog: the crate it acts on comes first, in large type. */
 .confirm-modal { z-index: 110; align-items: center; }
 .confirm-panel { width: min(560px, 100%); border-color: var(--danger); }
-.confirm-kicker { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
+.confirm-kicker { margin-right: auto; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
 .confirm-target {
   padding: 0.75rem 1rem;
   margin-bottom: 0.75rem;

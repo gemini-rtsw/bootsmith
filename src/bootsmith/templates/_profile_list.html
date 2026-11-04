@@ -95,20 +95,24 @@
                 </details>
               {% endif %}
               {% set is_saved = (saved_profile == p.name) %}
-              {% macro saved_badge(section_name) -%}
-                {%- if is_saved and saved_section == section_name -%}
-                  <span class="ok" style="padding:0.25rem 0.5rem;">Saved at {{ saved_at }}</span>
-                {%- endif -%}
-              {%- endmacro %}
               {# Edit dialog: a modal over the page so it reads as an input
                  dialog, not part of the list. Close with the x, Escape or a
-                 click on the backdrop (index.html modal script). #}
+                 click on the backdrop (index.html modal script).
+                 One form and one Save for the whole preset: name, loader,
+                 terminal servers and every boot param go to /update in one
+                 POST (for PPCBug the NIOT and ENV fields together are the
+                 full schema, so nothing saved is dropped). #}
               <div id="edit-{{ p.name }}"
                    class="modal{% if not is_saved %} hidden{% endif %}"
                    role="dialog" aria-modal="true" aria-labelledby="edit-title-{{ p.name }}">
                <div class="modal-panel">
                 <div class="modal-header">
                   <h3 id="edit-title-{{ p.name }}">Edit preset {{ p.name }}</h3>
+                  {% if is_saved and saved_section %}
+                    <span class="ok" style="padding:0.25rem 0.5rem;">Saved at {{ saved_at }}</span>
+                  {% endif %}
+                  <button type="submit" class="primary modal-save"
+                          form="edit-form-{{ p.name }}">Save</button>
                   <button type="button"
                           class="modal-close"
                           data-modal-close
@@ -116,17 +120,11 @@
                           title="Close (Esc)"
                           onclick="document.getElementById('edit-{{ p.name }}').classList.add('hidden')">&times;</button>
                 </div>
-                {# Connection (name/host/port/loader). Posts to the existing
-                   /update endpoint without any param_* fields, so the
-                   boot_params stay untouched. #}
-                <form hx-post="/profiles/{{ p.name }}/update"
+                <form id="edit-form-{{ p.name }}"
+                      hx-post="/profiles/{{ p.name }}/update"
                       hx-target="#main"
                       hx-swap="innerHTML">
                   <h4>Connection</h4>
-                  <div class="row" style="margin-bottom:8px;">
-                    <button type="submit" class="primary">Save</button>
-                    {{ saved_badge("connection") }}
-                  </div>
                   <div class="grid">
                     <label>Name <input name="new_name" required value="{{ p.name }}"
                                         pattern="[A-Za-z0-9._-]{1,64}"
@@ -148,43 +146,19 @@
                     from.
                   </p>
                   {{ terminal_server_rows("edit-ts-" + p.name, p.terminal_servers) }}
-                </form>
 
-                <div id="edit-params-{{ p.name }}" data-edit-params-container>
-                  {% if p.loader_hint == "ppcbug" %}
-                    <form hx-post="/profiles/{{ p.name }}/save/niot"
-                          hx-target="#main"
-                          hx-swap="innerHTML">
+                  <div id="edit-params-{{ p.name }}" data-edit-params-container>
+                    {% if p.loader_hint == "ppcbug" %}
                       <h4>NIOT</h4>
-                      <div class="row" style="margin-bottom:8px;">
-                        <button type="submit" class="primary">Save NIOT</button>
-                        {{ saved_badge("niot") }}
-                      </div>
                       {{ boot_param_fields(p.loader_hint, ppcbug_niot_fields, p.boot_params) }}
-                    </form>
-                    <form hx-post="/profiles/{{ p.name }}/save/env"
-                          hx-target="#main"
-                          hx-swap="innerHTML">
                       <h4>ENV</h4>
-                      <div class="row" style="margin-bottom:8px;">
-                        <button type="submit" class="primary">Save ENV</button>
-                        {{ saved_badge("env") }}
-                      </div>
                       {{ boot_param_fields(p.loader_hint, ppcbug_env_fields, p.boot_params) }}
-                    </form>
-                  {% else %}
-                    <form hx-post="/profiles/{{ p.name }}/update"
-                          hx-target="#main"
-                          hx-swap="innerHTML">
+                    {% else %}
                       <h4>Boot params ({{ loader_labels.get(p.loader_hint, p.loader_hint) }})</h4>
-                      <div class="row" style="margin-bottom:8px;">
-                        <button type="submit" class="primary">Save</button>
-                        {{ saved_badge("boot params") }}
-                      </div>
                       {{ boot_param_fields(p.loader_hint, schemas.get(p.loader_hint, ()), p.boot_params) }}
-                    </form>
-                  {% endif %}
-                </div>
+                    {% endif %}
+                  </div>
+                </form>
                </div>
               </div>
             </li>
