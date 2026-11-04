@@ -6,7 +6,9 @@ import threading
 import time
 from dataclasses import asdict
 
-from flask import Flask, Response, g, jsonify, render_template, request, stream_with_context
+from flask import (
+    Flask, Response, current_app, g, jsonify, render_template, request, stream_with_context,
+)
 from flask_sock import Sock
 from markupsafe import escape
 
@@ -48,14 +50,24 @@ def _render_profile_list(saved_profile: str = "", saved_section: str = ""):
     """
     return render_template(
         "_profile_list.html",
-        profiles=profiles_mod.list_profiles(),
+        **_list_context(),
+        saved_profile=saved_profile,
+        saved_section=saved_section,
+        saved_at=time.strftime("%H:%M:%S") if saved_profile else "",
+    )
+
+
+def _list_context() -> dict:
+    """Template context for the target list (system -> connection -> preset)."""
+    profiles = profiles_mod.list_profiles()
+    return dict(
+        profiles=profiles,
+        systems=profiles_mod.group_by_system(profiles),
+        port_viewers=current_app.config["sessions"].port_viewers(),
         schemas=schemas_mod.SCHEMAS,
         loader_labels=schemas_mod.LOADER_LABELS,
         ppcbug_niot_fields=ppcbug_mod.NIOT_USER_FIELDS,
         ppcbug_env_fields=ppcbug_mod.ENV_USER_FIELDS,
-        saved_profile=saved_profile,
-        saved_section=saved_section,
-        saved_at=time.strftime("%H:%M:%S") if saved_profile else "",
     )
 
 
@@ -113,14 +125,7 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        return render_template(
-            "index.html",
-            profiles=profiles_mod.list_profiles(),
-            schemas=schemas_mod.SCHEMAS,
-            loader_labels=schemas_mod.LOADER_LABELS,
-            ppcbug_niot_fields=ppcbug_mod.NIOT_USER_FIELDS,
-            ppcbug_env_fields=ppcbug_mod.ENV_USER_FIELDS,
-        )
+        return render_template("index.html", **_list_context())
 
     @app.get("/profiles")
     def list_profiles_route():
@@ -267,9 +272,39 @@ def create_app() -> Flask:
                 flush=True,
             )
             return _error(str(e)), 400
+        return _render_session(sessions.current(_sid()))
+
+    def _render_session(sess):
+        """The connected view, with the presets this tab can switch to:
+        every preset of the same system that uses this port."""
+        key = (sess.terminal_server.host, sess.terminal_server.port)
+        system = profiles_mod.system_name(sess.profile.name)
+        presets = [
+            p for p in profiles_mod.list_profiles()
+            if profiles_mod.system_name(p.name) == system
+            and any((t.host, t.port) == key for t in p.terminal_servers)
+        ]
         return render_template(
-            "_session.html", profile=profile, terminal_server=terminal_server
+            "_session.html",
+            profile=sess.profile,
+            terminal_server=sess.terminal_server,
+            system=system,
+            presets=presets,
         )
+
+    @app.post("/session/preset")
+    def session_preset():
+        name = (request.form.get("name") or "").strip()
+        profile = profiles_mod.get_profile(name)
+        if profile is None:
+            return _error(f"no such profile: {name!r}"), 404
+        try:
+            sess = app.config["sessions"].set_profile(_sid(), profile)
+        except LookupError as e:
+            return _error(str(e)), 404
+        except ValueError as e:
+            return _error(str(e)), 400
+        return _render_session(sess)
 
     @app.post("/session/cancel")
     def session_cancel():

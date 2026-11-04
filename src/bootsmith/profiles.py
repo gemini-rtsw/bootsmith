@@ -206,3 +206,79 @@ def _load_path(path: Path) -> Profile:
 
 def names(profiles: Iterable[Profile]) -> list[str]:
     return [p.name for p in profiles]
+
+
+# --- Grouping for the target list: system -> connection -> preset ---------
+
+# Leading name tokens that say where a preset is used rather than which
+# board it is for: MKO-PROD-GNIRSCC-new-bootserver -> GNIRSCC.
+_SITE_TOKENS = {"MKO", "PROD"}
+
+
+def system_name(profile_name: str) -> str:
+    """The system (board) a preset belongs to, derived from its name.
+
+    Site/environment prefixes are dropped and the next token is the
+    system; anything after it names the variant (new-bootserver, m2lab,
+    sim8, ...). A name with nothing left after the prefixes is its own
+    system.
+    """
+    tokens = [t for t in re.split(r"[-_]", profile_name) if t]
+    rest = list(tokens)
+    while rest and rest[0].upper() in _SITE_TOKENS:
+        rest.pop(0)
+    return (rest[0] if rest else profile_name).upper()
+
+
+@dataclass
+class ConnectionGroup:
+    """One terminal-server port of a system and the presets that use it.
+
+    `presets` pairs each preset with the name *it* gives this port, which
+    is what /session/open needs (presets don't always agree on names).
+    """
+
+    name: str
+    host: str
+    port: int
+    presets: list[tuple[Profile, str]] = field(default_factory=list)
+
+
+@dataclass
+class SystemGroup:
+    name: str
+    connections: list[ConnectionGroup] = field(default_factory=list)
+    presets: list[Profile] = field(default_factory=list)
+
+
+def _preset_order(system: str, profile: Profile) -> tuple:
+    # The plain production preset (MKO-PROD-<system>) first, then by name.
+    rest = [t for t in re.split(r"[-_]", profile.name) if t.upper() not in _SITE_TOKENS]
+    return (len(rest) > 1, profile.name.lower())
+
+
+def group_by_system(profiles: Iterable[Profile]) -> list[SystemGroup]:
+    systems: dict[str, SystemGroup] = {}
+    for p in profiles:
+        systems.setdefault(system_name(p.name), SystemGroup(system_name(p.name))).presets.append(p)
+    out = []
+    for name in sorted(systems):
+        sg = systems[name]
+        sg.presets.sort(key=lambda p: _preset_order(name, p))
+        conns: dict[tuple[str, int], ConnectionGroup] = {}
+        labels: dict[tuple[str, int], list[str]] = {}
+        for p in sg.presets:
+            for ts in p.terminal_servers:
+                key = (ts.host, ts.port)
+                conns.setdefault(key, ConnectionGroup(ts.name, ts.host, ts.port)).presets.append((p, ts.name))
+                labels.setdefault(key, []).append(ts.name)
+        for key, cg in conns.items():
+            # Label a port by the name most of its presets give it; on a
+            # tie prefer "production", then the first preset's name.
+            names = labels[key]
+            cg.name = max(dict.fromkeys(names), key=lambda n: (names.count(n), n == "production"))
+        sg.connections = sorted(
+            conns.values(), key=lambda c: (c.name != "production", c.name.lower(), c.host, c.port)
+        )
+        out.append(sg)
+    return out

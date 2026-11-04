@@ -324,3 +324,43 @@ button.danger {
 button:disabled { opacity: 0.6; cursor: progress; }
 .cancel-connect { margin-left: 0.5rem; }
 #flash:empty { display: none; }
+
+/* Target list: system -> connection -> preset */
+details.system {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  margin: 0 0 8px;
+  padding: 6px 10px;
+}
+details.system > summary {
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+}
+details.system > summary .meta { flex: 0 1 auto; }
+details.system[open] > summary { margin-bottom: 6px; }
+.connection {
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 6px 10px;
+  margin: 6px 0;
+}
+.connection-name { font-weight: 600; }
+.preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.preset-buttons form.inline { display: inline-flex; gap: 6px; align-items: center; }
+.in-use { color: #5ec27a; font-size: 0.85rem; }
+.presets-heading { margin: 12px 0 4px; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.preset-name { font-family: var(--font-mono); }
+.preset-select select { margin-left: 4px; }
+/* htmx only fades the indicator (opacity), so it would still take its
+   width and push each preset button onto its own line. */
+.preset-buttons .htmx-indicator { display: none; }
+.preset-buttons .htmx-request .htmx-indicator { display: inline; }
+.preset-select label { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; color: var(--muted); }
