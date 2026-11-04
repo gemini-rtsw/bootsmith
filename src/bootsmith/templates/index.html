@@ -162,6 +162,44 @@
         }, 1000);
       }
 
+      // Edit dialogs (.modal). Opening focuses the first field; Escape
+      // or a click on the backdrop presses the dialog's close button
+      // ([data-modal-close]), so each dialog keeps its own close action
+      // (hide the preset form, or hx-get /params for session dialogs).
+      // Capture phase: Escape must close the dialog, not reach the
+      // terminal handler below.
+      window.bsOpenModal = (id) => {
+        const m = document.getElementById(id);
+        if (!m) return;
+        m.classList.remove("hidden");
+        const f = m.querySelector("input, select, textarea");
+        if (f) f.focus();
+      };
+      const openModal = () =>
+        Array.from(document.querySelectorAll(".modal"))
+          .find((m) => !m.classList.contains("hidden"));
+      const closeModal = (m) => {
+        const btn = m && m.querySelector("[data-modal-close]");
+        if (btn) btn.click();
+      };
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        const m = openModal();
+        if (!m) return;
+        e.preventDefault(); e.stopPropagation();
+        closeModal(m);
+      }, true);
+      document.addEventListener("click", (e) => {
+        if (e.target.classList && e.target.classList.contains("modal")) closeModal(e.target);
+      });
+      document.body.addEventListener("htmx:afterSwap", () => {
+        const m = openModal();
+        if (m && !m.contains(document.activeElement)) {
+          const f = m.querySelector("input, select, textarea");
+          if (f) f.focus();
+        }
+      });
+
       // Keydown handler — bound ONCE at document level. Only acts when
       // #terminal-input is the active element. Independent of any
       // htmx swap on #params or anywhere else.

@@ -1,12 +1,27 @@
+{# VxWorks boot-param edit dialog, shown as a modal over the session.
+   The x (data-modal-close) returns #params to the table; Escape and a
+   backdrop click press it (index.html modal script). #}
 {% from "_profile_form_fields.html" import boot_param_fields %}
 {% include "_params_actions.html" %}
-<h3>Edit boot params for {{ profile.name }}</h3>
-<form hx-post="/profiles/{{ profile.name }}/update"
-      hx-target="#params"
-      hx-swap="innerHTML"
-      hx-headers='{"X-Return": "params"}'>
-  <div class="controls">
-    <button type="submit" class="primary">Save</button>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="params-edit-title">
+  <div class="modal-panel">
+    <form hx-post="/profiles/{{ profile.name }}/update"
+          hx-target="#params"
+          hx-swap="innerHTML"
+          hx-headers='{"X-Return": "params"}'>
+      <div class="modal-header">
+        <h3 id="params-edit-title">Edit boot params for {{ profile.name }}</h3>
+        <button type="button"
+                class="modal-close"
+                data-modal-close
+                aria-label="Close"
+                title="Close (Esc)"
+                hx-get="/params" hx-target="#params" hx-swap="innerHTML">&times;</button>
+      </div>
+      <div class="controls">
+        <button type="submit" class="primary">Save</button>
+      </div>
+      {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
+    </form>
   </div>
-  {{ boot_param_fields(profile.loader_hint, fields, profile.boot_params) }}
-</form>
+</div>
