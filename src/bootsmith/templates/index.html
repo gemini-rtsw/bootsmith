@@ -59,6 +59,38 @@
     <small>v0.1 &mdash; a board open in several tabs is shared: everyone sees the console and can type</small>
   </footer>
 
+  {# Confirm dialog for the two moments that pick or restart a crate:
+     Connect, and Boot / reboot (the Boot button, a typed `reboot`,
+     `exit` or `RESET`, Ctrl-X). Once connected, push/diag/CNFG do not ask: the
+     operator has already confirmed which crate this is. Delete preset
+     uses it too (it always asked). It
+     names the system, preset and console first, in large type, so the
+     operator sees which crate they are about to act on. Last in the body
+     so it stacks above an open edit dialog. #}
+  <div id="confirm-modal" class="modal confirm-modal hidden"
+       role="alertdialog" aria-modal="true" aria-labelledby="confirm-system">
+    <div class="modal-panel confirm-panel">
+      <div class="modal-header">
+        <span class="confirm-kicker">You are about to act on</span>
+        <button type="button" class="modal-close" data-modal-close
+                aria-label="Cancel" title="Cancel (Esc)"
+                onclick="bsConfirmDone(false)">&times;</button>
+      </div>
+      <div class="confirm-target">
+        <div id="confirm-system" class="confirm-system"></div>
+        <dl>
+          <dt>Preset</dt><dd id="confirm-preset"></dd>
+          <dt>Console</dt><dd id="confirm-console"></dd>
+        </dl>
+      </div>
+      <p id="confirm-action" class="confirm-action"></p>
+      <div class="row confirm-buttons">
+        <button type="button" id="confirm-cancel" onclick="bsConfirmDone(false)">Cancel</button>
+        <button type="button" id="confirm-ok" class="danger" onclick="bsConfirmDone(true)">OK</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Dumb terminal + lightweight status poller. The terminal is a
     // straight WebSocket <-> <pre> pipe; nothing else on the page
@@ -175,9 +207,11 @@
         const f = m.querySelector("input, select, textarea");
         if (f) f.focus();
       };
+      // The topmost open dialog: the last one in the document (the
+      // confirm dialog is last, so it wins over an edit dialog).
       const openModal = () =>
         Array.from(document.querySelectorAll(".modal"))
-          .find((m) => !m.classList.contains("hidden"));
+          .filter((m) => !m.classList.contains("hidden")).pop();
       const closeModal = (m) => {
         const btn = m && m.querySelector("[data-modal-close]");
         if (btn) btn.click();
@@ -200,6 +234,48 @@
         }
       });
 
+      // Confirm dialog. bsConfirm(action, okLabel, targetEl) shows the
+      // system / preset / console from the nearest data-confirm-* element
+      // (the connect form itself, or the .session section for anything
+      // inside a session) and resolves true on OK. Cancel is focused, so
+      // a stray Enter does not confirm.
+      let confirmResolve = null;
+      window.bsConfirmDone = (ok) => {
+        document.getElementById("confirm-modal").classList.add("hidden");
+        const r = confirmResolve; confirmResolve = null;
+        if (r) r(ok);
+      };
+      window.bsConfirm = (action, okLabel, targetEl) => {
+        if (confirmResolve) bsConfirmDone(false);
+        const src = targetEl && targetEl.closest("[data-confirm-system]");
+        const d = src ? src.dataset : {};
+        const set = (id, v) => { document.getElementById(id).textContent = v || "\u2014"; };
+        set("confirm-system", d.confirmSystem || "unknown system");
+        set("confirm-preset", d.confirmPreset);
+        set("confirm-console", d.confirmConsole);
+        document.getElementById("confirm-action").textContent = action;
+        document.getElementById("confirm-ok").textContent = okLabel || "OK";
+        document.getElementById("confirm-modal").classList.remove("hidden");
+        document.getElementById("confirm-cancel").focus();
+        return new Promise((resolve) => { confirmResolve = resolve; });
+      };
+      // Every hx-confirm goes through the dialog instead of window.confirm.
+      document.body.addEventListener("htmx:confirm", (e) => {
+        if (!e.detail.question) return;
+        e.preventDefault();
+        const elt = e.detail.elt;
+        const okEl = elt.closest("[data-confirm-ok]");
+        bsConfirm(e.detail.question, okEl && okEl.dataset.confirmOk, elt)
+          .then((ok) => { if (ok) e.detail.issueRequest(true); });
+      });
+      // A terminal line that reboots or ends the crate's shell: vxWorks
+      // `reboot` and `exit`, PPCBug `RESET`. Ctrl-X (vxWorks reboot key)
+      // is checked separately.
+      const REBOOT_LINE = /^\s*(reboot|reset|exit)\b/i;
+      const confirmReboot = (how) => bsConfirm(
+        "Reboot this crate (" + how + "). Everything it runs stops and its mechanisms lose their index.",
+        "Reboot", document.getElementById("terminal-input"));
+
       // Keydown handler — bound ONCE at document level. Only acts when
       // #terminal-input is the active element. Independent of any
       // htmx swap on #params or anywhere else.
@@ -207,7 +283,20 @@
         const input = document.getElementById("terminal-input");
         if (!input || document.activeElement !== input) return;
         if (e.key === "Enter") {
-          e.preventDefault(); sendBytes("\r"); input.value = ""; return;
+          e.preventDefault();
+          const line = input.value;
+          if (REBOOT_LINE.test(line)) {
+            // The characters already reached the board; on Cancel, erase
+            // them there so the line is not run by the next Enter.
+            confirmReboot("typed: " + line.trim()).then((ok) => {
+              if (ok) sendBytes("\r");
+              else sendBytes("\x7f".repeat(line.length));
+              input.value = "";
+              input.focus();
+            });
+            return;
+          }
+          sendBytes("\r"); input.value = ""; return;
         }
         if (e.key === "Backspace") {
           e.preventDefault(); sendBytes("\x7f"); input.value = input.value.slice(0, -1); return;
@@ -217,7 +306,15 @@
         if (e.ctrlKey && e.key.length === 1) {
           const code = e.key.toUpperCase().charCodeAt(0);
           if (code >= 0x40 && code <= 0x5f) {
-            e.preventDefault(); sendBytes(String.fromCharCode(code - 0x40)); return;
+            e.preventDefault();
+            if (code === 0x58) {  // Ctrl-X: vxWorks reboot
+              confirmReboot("Ctrl-X").then((ok) => {
+                if (ok) sendBytes("\x18");
+                input.focus();
+              });
+              return;
+            }
+            sendBytes(String.fromCharCode(code - 0x40)); return;
           }
         }
         if (e.key.length === 1 && !e.metaKey && !e.altKey) {
@@ -240,6 +337,20 @@
           .replace(/\u00a0/g, " ")
           .replace(/\r\n?|\n/g, "\r");
         if (!text) return;
+        // A pasted line that reboots runs at its CR: confirm first.
+        const reboots = text.split("\r").slice(0, -1)
+          .filter((l, i) => REBOOT_LINE.test(i === 0 ? input.value + l : l));
+        if (reboots.length) {
+          confirmReboot("pasted: " + reboots[0].trim()).then((ok) => {
+            if (ok) {
+              sendBytes(text);
+              const last = text.split("\r").pop();
+              input.value = last;
+            }
+            input.focus();
+          });
+          return;
+        }
         sendBytes(text);
         const lastLine = text.split("\r").pop();
         input.value = text.includes("\r") ? lastLine : input.value + text;

@@ -32,7 +32,14 @@
             <div class="preset-buttons">
               {% for p, ts_name in c.presets %}
                 <form hx-post="/session/open" hx-target="#main" hx-swap="innerHTML"
-                      hx-disabled-elt="find button" class="inline">
+                      hx-disabled-elt="find button" class="inline"
+                      hx-disinherit="hx-confirm"
+
+                      hx-confirm="Open the serial console of this crate.{% if n %} It is already open in {{ n }} tab{{ '' if n == 1 else 's' }}; you will share it and can both type.{% endif %}"
+                      data-confirm-ok="Connect"
+                      data-confirm-system="{{ sys.name }}"
+                      data-confirm-preset="{{ p.name }}"
+                      data-confirm-console="{{ c.name }} &mdash; {{ c.host }}:{{ c.port }}">
                   <input type="hidden" name="name" value="{{ p.name }}">
                   <input type="hidden" name="terminal_server" value="{{ ts_name }}">
                   <button type="submit" class="primary" title="Connect with this preset">{{ p.name }}</button>
@@ -69,7 +76,12 @@
                 <form hx-post="/profiles/{{ p.name }}/delete"
                       hx-target="#main"
                       hx-swap="innerHTML"
-                      hx-confirm="Delete profile {{ p.name }}?"
+                      hx-disinherit="hx-confirm"
+
+                      hx-confirm="Delete this preset from the server. This cannot be undone here."
+                      data-confirm-ok="Delete preset"
+                      data-confirm-system="{{ sys.name }}"
+                      data-confirm-preset="{{ p.name }}"
                       class="inline">
                   <button type="submit" class="danger">Delete</button>
                 </form>

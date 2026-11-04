@@ -1,4 +1,9 @@
-<section class="session" data-profile="{{ profile.name }}">
+{# data-confirm-* name the crate this session talks to; the confirm
+   dialog (index.html) shows them for every action inside it. #}
+<section class="session" data-profile="{{ profile.name }}"
+         data-confirm-system="{{ system }}"
+         data-confirm-preset="{{ profile.name }}"
+         data-confirm-console="{{ terminal_server.name }} &mdash; {{ terminal_server.host }}:{{ terminal_server.port }}">
   {% set boot_label = "Boot (NBO)" if profile.loader_hint == "ppcbug" else "Boot (@)" %}
   <div class="session-header">
     <h2>{{ system }}</h2>
@@ -15,7 +20,11 @@
         </select>
       </label>
     </form>
-    <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML" class="inline">
+    <form hx-post="/params/boot" hx-target="#params" hx-swap="innerHTML" class="inline"
+          hx-disinherit="hx-confirm"
+
+          hx-confirm="Boot this crate now ({{ boot_label }}). It loads the IOC with the boot parameters it holds."
+          data-confirm-ok="Boot">
       <button type="submit" class="primary">{{ boot_label }}</button>
     </form>
     <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
