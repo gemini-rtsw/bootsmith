@@ -13,6 +13,8 @@ _PROFILE_DIR: Path = Path(
     os.environ.get("BOOTSMITH_PROFILES_DIR", str(_DEFAULT_PROFILE_DIR))
 ).expanduser()
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+# System names: what the board is (GMOSCC, MCS, GNIRSDC1). Stored upper case.
+_SYSTEM_RE = re.compile(r"^[A-Z0-9_-]{1,32}$")
 
 
 def set_profile_dir(path: Path | str) -> None:
@@ -61,12 +63,32 @@ class Profile:
     banners: dict = field(default_factory=dict)
     boot_params: dict = field(default_factory=dict)
     notes: str = ""
+    # The board this preset is for (GMOSCC, MCS, ...). Set explicitly so a
+    # preset's system never depends on how its name is spelled; "" only in
+    # files written before the field existed (see system_of).
+    system: str = ""
 
     def terminal_server(self, name: str) -> TerminalServer | None:
         for ts in self.terminal_servers:
             if ts.name == name:
                 return ts
         return None
+
+
+def normalize_system(system: str) -> str:
+    """Upper-case and validate a system name; raises ValueError."""
+    s = (system or "").strip().upper()
+    if not _SYSTEM_RE.match(s):
+        raise ValueError(
+            f"invalid system name {system!r}: letters, digits, '-' or '_', max 32"
+        )
+    return s
+
+
+def system_of(profile: Profile) -> str:
+    """The preset's system: its `system` field, or for a file written
+    before that field existed, the system read from its name."""
+    return profile.system or system_name(profile.name)
 
 
 def _profile_path(name: str) -> Path:
@@ -172,6 +194,7 @@ def duplicate_profile(name: str) -> Profile:
         banners=dict(src.banners),
         boot_params=dict(src.boot_params),
         notes=src.notes,
+        system=system_of(src),
     )
     save_profile(copy)
     return copy
@@ -201,6 +224,7 @@ def _load_path(path: Path) -> Profile:
         banners=data.get("banners", {}),
         boot_params=boot_params,
         notes=data.get("notes", ""),
+        system=(data.get("system") or "").strip().upper(),
     )
 
 
@@ -260,7 +284,8 @@ def _preset_order(system: str, profile: Profile) -> tuple:
 def group_by_system(profiles: Iterable[Profile]) -> list[SystemGroup]:
     systems: dict[str, SystemGroup] = {}
     for p in profiles:
-        systems.setdefault(system_name(p.name), SystemGroup(system_name(p.name))).presets.append(p)
+        s = system_of(p)
+        systems.setdefault(s, SystemGroup(s)).presets.append(p)
     out = []
     for name in sorted(systems):
         sg = systems[name]
@@ -282,3 +307,95 @@ def group_by_system(profiles: Iterable[Profile]) -> list[SystemGroup]:
         )
         out.append(sg)
     return out
+
+
+def system_presets(system: str) -> list[Profile]:
+    return [p for p in list_profiles() if system_of(p) == system]
+
+
+def system_exists(system: str) -> bool:
+    return any(system_of(p) == system for p in list_profiles())
+
+
+# --- Connection edits for one system --------------------------------------
+#
+# A connection (WTI console port) is not stored on its own: each preset
+# lists the consoles it may be used on in terminal_servers. Editing a
+# connection therefore rewrites the matching entry in every preset of the
+# system that has it. Each change is checked for every preset before any
+# file is written, so a refused change leaves all files as they were.
+
+
+class ConnectionError_(ValueError):
+    """A connection change that would leave the presets inconsistent."""
+
+
+def _save_all(presets: list[Profile]) -> None:
+    for p in presets:
+        if not p.system:
+            p.system = system_of(p)
+        save_profile(p)
+
+
+def set_connection(
+    system: str,
+    old: tuple[str, int] | None,
+    new: TerminalServer,
+    used_by: Iterable[str],
+) -> None:
+    """Create (old=None) or edit the connection `old` of `system`.
+
+    `used_by` names the presets that should list the connection; every
+    other preset of the system drops it. Refused (nothing written) if no
+    preset uses it, if a preset would be left with no connection, or if
+    the new host:port is already another connection of the system.
+    """
+    used_by = set(used_by)
+    presets = system_presets(system)
+    names_ = {p.name for p in presets}
+    unknown = used_by - names_
+    if unknown:
+        raise ConnectionError_(f"not presets of {system}: {', '.join(sorted(unknown))}")
+    if not used_by:
+        raise ConnectionError_("tick at least one preset that uses this connection")
+    new_key = (new.host, int(new.port))
+    if new_key != old and any(
+        (t.host, t.port) == new_key for p in presets for t in p.terminal_servers
+    ):
+        raise ConnectionError_(f"{new.host}:{new.port} is already a connection of {system}")
+    left_empty = []
+    for p in presets:
+        kept = [t for t in p.terminal_servers if old is None or (t.host, t.port) != old]
+        if p.name in used_by:
+            # Keep its place in the list when editing.
+            idx = next(
+                (i for i, t in enumerate(p.terminal_servers) if old and (t.host, t.port) == old),
+                len(kept),
+            )
+            kept.insert(min(idx, len(kept)), TerminalServer(new.name, new.host, int(new.port)))
+        if not kept:
+            left_empty.append(p.name)
+        p.terminal_servers = kept
+    if left_empty:
+        raise ConnectionError_(
+            "these presets would have no connection left: " + ", ".join(left_empty)
+        )
+    _save_all(presets)
+
+
+def delete_connection(system: str, key: tuple[str, int]) -> None:
+    """Remove the connection from every preset of `system`. Refused if a
+    preset would be left with no connection."""
+    presets = system_presets(system)
+    left_empty = [
+        p.name for p in presets
+        if p.terminal_servers and all((t.host, t.port) == key for t in p.terminal_servers)
+    ]
+    if left_empty:
+        raise ConnectionError_(
+            "these presets use only this connection; give them another one "
+            "or delete them first: " + ", ".join(left_empty)
+        )
+    for p in presets:
+        p.terminal_servers = [t for t in p.terminal_servers if (t.host, t.port) != key]
+    _save_all(presets)
