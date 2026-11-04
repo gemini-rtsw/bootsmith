@@ -118,6 +118,18 @@
       let lastProfile = null;
       let paramsLoadedForLoader = null;
 
+      // Erase the last character already in the pane, as a terminal's
+      // backspace does, but never past the start of the line.
+      function eraseLastInPane(pre) {
+        let node = pre.lastChild;
+        while (node && node.nodeType === Node.TEXT_NODE && node.data.length === 0) {
+          const prev = node.previousSibling; node.remove(); node = prev;
+        }
+        if (node && node.nodeType === Node.TEXT_NODE && !node.data.endsWith("\n")) {
+          node.data = node.data.slice(0, -1);
+        }
+      }
+
       function appendSerial(data) {
         const pre = document.getElementById("serial");
         if (!pre) return;
@@ -125,13 +137,20 @@
         for (let i = 0; i < data.length; i++) {
           const c = data[i];
           if (c === 13) continue;
+          if (c === 8) {
+            // Backspace: the board echoes "\b \b" to erase a typed
+            // character. Act on it instead of printing \x08.
+            if (s.length && !s.endsWith("\n")) s = s.slice(0, -1);
+            else if (!s.length) eraseLastInPane(pre);
+            continue;
+          }
           if (c === 9 || c === 10 || (c >= 32 && c < 127)) {
             s += String.fromCharCode(c);
           } else {
             s += "\\x" + c.toString(16).padStart(2, "0");
           }
         }
-        pre.appendChild(document.createTextNode(s));
+        if (s) pre.appendChild(document.createTextNode(s));
         if (pre.textContent.length > 200000) {
           pre.textContent = pre.textContent.slice(-150000);
         }
