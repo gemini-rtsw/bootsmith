@@ -6,7 +6,7 @@
     <tbody>
       {% for label, key in fields %}
         {% if profile.boot_params.get(key) %}
-          <tr><th>{{ label }}</th><td><code>{{ profile.boot_params[key] }}</code></td></tr>
+          <tr><th title="{{ param_help(key) }}">{{ label }}</th><td><code>{{ profile.boot_params[key] }}</code></td></tr>
         {% endif %}
       {% endfor %}
     </tbody>

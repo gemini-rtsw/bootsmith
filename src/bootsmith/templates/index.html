@@ -53,6 +53,8 @@
   <header>
     <h1>Bootsmith</h1>
     <p class="tagline">VME boot-parameter editor over WTI serial</p>
+    <a class="help-link" href="/help" target="_blank" rel="noopener"
+       title="How to use bootsmith, save presets to git and roll out a new version">Help</a>
   </header>
 
   <div id="flash" role="alert" aria-live="assertive"></div>
@@ -62,7 +64,7 @@
   </main>
 
   <footer>
-    <small>v0.1 &mdash; a board open in several tabs is shared: everyone sees the console and can type</small>
+    <small>{{ running_image or "v0.1" }} &mdash; a board open in several tabs is shared: everyone sees the console and can type &middot; <a href="/help" target="_blank" rel="noopener">Help</a></small>
   </footer>
 
   {# Confirm dialog for the two moments that pick or restart a crate:
@@ -110,6 +112,13 @@
         at_prompt: "AT PROMPT",
         missed: "no prompt detected",
         running: "OS running",
+      };
+      const STATE_HELP = {
+        waiting: "Connected. Waiting for the crate to reboot; bootsmith stops its auto-boot at the boot prompt.",
+        aborting: "Reboot seen: sending the key that stops the auto-boot.",
+        at_prompt: "At the boot prompt: Push and Boot are allowed.",
+        missed: "The reboot was seen but the boot prompt never came. Reboot again or click Find prompt.",
+        running: "Booted or not at the boot prompt: the crate is running its OS. Reboot it to push again.",
       };
 
       let sse = null;
@@ -409,6 +418,7 @@
         if (reconnectForm) reconnectForm.style.display = "none";
         stateEl.textContent = STATE_LABEL[j.state] || j.state;
         stateEl.className = "state-pill state-" + j.state;
+        stateEl.title = STATE_HELP[j.state] || "";
         if (loaderEl) loaderEl.textContent = j.loader ? "loader: " + j.loader : "";
         if (aborts) aborts.textContent = j.abort_chars_sent ? "abort: " + j.abort_chars_sent + "B sent" : "";
         if (bytes && j.transport) bytes.textContent = "in " + j.transport.bytes_in + "B / out " + j.transport.bytes_out + "B";

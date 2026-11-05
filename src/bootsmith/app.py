@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import threading
@@ -77,6 +78,10 @@ def _list_context() -> dict:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.jinja_env.globals["param_help"] = schemas_mod.help_for
+    # The unit passes the pinned image (e.g. ghcr.io/...:0.1.0-git<hash>) so
+    # the page can show which build is running.
+    app.jinja_env.globals["running_image"] = os.environ.get("BOOTSMITH_IMAGE", "")
     # One session per browser tab, keyed by _sid(). Push/CNFG
     # job state and the push lock live on each Session (see session.py).
     app.config["sessions"] = SessionManager()
@@ -128,6 +133,11 @@ def create_app() -> Flask:
                 pass
 
     threading.Thread(target=_reaper, name="session-reaper", daemon=True).start()
+
+    @app.get("/help")
+    def help_page():
+        """How to use bootsmith, save presets to git and roll out a version."""
+        return render_template("help.html")
 
     @app.get("/")
     def index():

@@ -7,7 +7,7 @@
   <div class="modal-header">
     <h3 id="{{ id }}-title">{{ title }}</h3>
     {% if badge %}<span class="ok" style="padding:0.25rem 0.5rem;">{{ badge }}</span>{% endif %}
-    <button type="submit" class="primary modal-save" form="{{ form_id }}">Save</button>
+    <button type="submit" class="primary modal-save" form="{{ form_id }}" title="Save to the preset files on the server. Nothing is sent to a crate. Commit and push from the server to keep it in git (see Help).">Save</button>
     <button type="button" class="modal-close" data-modal-close aria-label="Close" title="Close (Esc)"
             onclick="document.getElementById('{{ id }}').classList.add('hidden')">&times;</button>
   </div>
@@ -101,7 +101,7 @@
                 <span class="meta">{{ c.host }}:{{ c.port }}</span>
                 {% if n %}<span class="in-use">&#9679; open in {{ n }} tab{{ "" if n == 1 else "s" }}; connecting joins it</span>{% endif %}
                 <span class="htmx-indicator connecting">Connecting&hellip; (up to ~40&nbsp;s if the port is busy)
-                  <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)">Cancel</button>
+                  <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)" title="Stop trying to connect">Cancel</button>
                 </span>
               </form>
             </div>
@@ -113,7 +113,7 @@
         {# ---------------- Presets ---------------- #}
         <div class="row section-heading">
           <h4 class="presets-heading">Presets</h4>
-          <button type="button" class="edit-toggle" onclick="bsOpenModal('new-preset-{{ sys.name }}')">+ New preset</button>
+          <button type="button" class="edit-toggle" onclick="bsOpenModal('new-preset-{{ sys.name }}')" title="Add a preset (a named set of boot parameters) to {{ sys.name }}">+ New preset</button>
         </div>
         <ul class="profile-list">
           {% for p in sys.presets %}
@@ -126,9 +126,9 @@
                   &middot; on {% for t in p.terminal_servers %}{{ t.name }}{% if not loop.last %}, {% endif %}{% else %}no connection{% endfor %}
                 </span>
                 {% if not p.system %}<span class="unset" title="No system field yet; read from the name. Saving the preset writes it.">system not set</span>{% endif %}
-                <button type="button" class="edit-toggle" onclick="bsOpenModal('edit-{{ p.name }}')">Edit</button>
+                <button type="button" class="edit-toggle" onclick="bsOpenModal('edit-{{ p.name }}')" title="Edit {{ p.name }}: name, loader, connections and boot parameters">Edit</button>
                 <form hx-post="/profiles/{{ p.name }}/duplicate" hx-target="#main" hx-swap="innerHTML" class="inline">
-                  <button type="submit" class="edit-toggle">Duplicate</button>
+                  <button type="submit" class="edit-toggle" title="Copy {{ p.name }} to a new preset in the same system">Duplicate</button>
                 </form>
                 <form hx-post="/profiles/{{ p.name }}/delete" hx-target="#main" hx-swap="innerHTML"
                       hx-disinherit="hx-confirm"
@@ -137,12 +137,12 @@
                       data-confirm-system="{{ sys.name }}"
                       data-confirm-preset="{{ p.name }}"
                       class="inline">
-                  <button type="submit" class="danger">Delete</button>
+                  <button type="submit" class="danger" title="Delete {{ p.name }} from the server (asks first). Git history keeps the old file once committed.">Delete</button>
                 </form>
               </div>
               {% if p.boot_params %}
                 <details class="params-view">
-                  <summary>View params</summary>
+                  <summary title="Show the boot parameters saved in this preset">View params</summary>
                   <pre class="params-text">{% for label, key in schemas.get(p.loader_hint, ()) -%}
 {% if p.boot_params.get(key) %}{{ label }}: {{ p.boot_params[key] }}
 {% endif %}{%- endfor %}</pre>
@@ -203,7 +203,7 @@
         {# ---------------- Connections ---------------- #}
         <div class="row section-heading">
           <h4 class="presets-heading">Connections</h4>
-          <button type="button" class="edit-toggle" onclick="bsOpenModal('new-conn-{{ sys.name }}')">+ New connection</button>
+          <button type="button" class="edit-toggle" onclick="bsOpenModal('new-conn-{{ sys.name }}')" title="Add a serial console (terminal server host:port) for {{ sys.name }}">+ New connection</button>
         </div>
         <ul class="profile-list">
           {% for c in sys.connections %}
@@ -212,7 +212,7 @@
               <div class="row">
                 <span class="preset-name">{{ c.name }}</span>
                 <span class="meta">{{ c.host }}:{{ c.port }} &middot; used by {{ c.presets|length }} preset{{ "" if c.presets|length == 1 else "s" }}</span>
-                <button type="button" class="edit-toggle" onclick="bsOpenModal('{{ cid }}')">Edit</button>
+                <button type="button" class="edit-toggle" onclick="bsOpenModal('{{ cid }}')" title="Change this console's name, host or port, or which presets use it">Edit</button>
                 <form hx-post="/systems/{{ sys.name }}/connections/delete" hx-target="#main" hx-swap="innerHTML"
                       hx-disinherit="hx-confirm"
                       hx-confirm="Remove this connection from every {{ sys.name }} preset that uses it."
@@ -222,7 +222,7 @@
                       class="inline">
                   <input type="hidden" name="old_host" value="{{ c.host }}">
                   <input type="hidden" name="old_port" value="{{ c.port }}">
-                  <button type="submit" class="danger">Delete</button>
+                  <button type="submit" class="danger" title="Remove this console from every {{ sys.name }} preset (asks first)">Delete</button>
                 </form>
               </div>
               <div id="{{ cid }}" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="{{ cid }}-title">

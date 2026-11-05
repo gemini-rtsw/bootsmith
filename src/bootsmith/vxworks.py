@@ -60,6 +60,26 @@ FIELDS: tuple[tuple[str, str], ...] = (
 
 # unit_number is intercalated between boot_device and processor_number on some
 # boards. We treat it separately because the `c` dialogue order is fixed.
+# Hover text for each boot parameter (shown in the params table and edit
+# forms). vxWorks 5.x boot ROM meanings plus the values Gemini North uses.
+FIELD_HELP: dict[str, str] = {
+    "boot_device": "Network interface the boot ROM loads the kernel through: ei (mv167), dc (mv2700).",
+    "unit_number": "Interface unit number. The mv167 (vxWorks 5.2) ROM has no such field; leave blank there.",
+    "processor_number": "CPU number on the VME backplane. 0 for the single CPU in a Gemini crate.",
+    "host_name": "Boot server name. Must match its rhosts/exports: pisces-control (old) or mkotcsbootv2-lv1 (new).",
+    "file_name": "Kernel path on the boot server, loaded over rsh as `user`.",
+    "inet_on_ethernet": "This crate's IP and netmask in hex, e.g. 10.2.2.121:ffffff00.",
+    "inet_on_backplane": "IP on the VME backplane network. Not used at Gemini: leave blank.",
+    "host_inet": "Boot server IP: 10.2.2.57 = pisces-control, 10.2.2.145 = mkotcsbootv2-lv1.",
+    "gateway_inet": "Router to use when the boot server is on another subnet.",
+    "user": "Account on the boot server that serves the files (gemvx).",
+    "ftp_password": "Blank = load with rsh (needs the crate in the server's rhosts). A password switches to FTP.",
+    "flags": "Hex boot flags. 0x8 = quick auto-boot (Gemini default). 0x4 = don't auto-boot, 0x2 = load local symbols, 0x20 = no login security, 0x40 = BOOTP, 0x80 = TFTP.",
+    "target_name": "This crate's own hostname, e.g. gmoscc.",
+    "startup_script": "Script the kernel runs after loading: cds to the IOC, loads objects and runs iocInit.",
+    "other": "Extra string passed to the kernel. Usually blank.",
+}
+
 FIELDS_WITH_UNIT: tuple[tuple[str, str], ...] = (
     ("boot device",       "boot_device"),
     ("unit number",       "unit_number"),

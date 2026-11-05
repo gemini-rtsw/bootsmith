@@ -114,3 +114,17 @@ class PushAfterBootTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HelpAndTooltipTests(unittest.TestCase):
+    def test_help_page_covers_use_git_and_rollout(self):
+        html = create_app().test_client().get("/help").get_data(as_text=True)
+        for needle in ("Using bootsmith", "Saving presets to git", "git push",
+                       "Rolling out a new version", "systemctl restart bootsmith",
+                       "{{.Image}}"):
+            self.assertIn(needle, html)
+
+    def test_boot_param_labels_have_hover_help(self):
+        from bootsmith import schemas
+        self.assertIn("10.2.2.145", schemas.help_for("host_inet"))
+        self.assertEqual(schemas.help_for("nope"), "")
