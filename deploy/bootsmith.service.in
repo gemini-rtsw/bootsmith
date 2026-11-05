@@ -39,6 +39,7 @@ ExecStartPre=-/usr/bin/docker rm -f bootsmith
 ExecStart=/bin/sh -c 'exec /usr/bin/docker run --rm --name bootsmith \
   --user "$(id -u bootsmith):$(id -g bootsmith)" \
   -p ${BOOTSMITH_PORT}:8080 \
+  -e BOOTSMITH_IMAGE=${IMAGE} \
   -v /var/lib/bootsmith/profiles:/data/profiles \
   --read-only --tmpfs /tmp \
   --cap-drop ALL --security-opt no-new-privileges \

@@ -29,7 +29,7 @@
 </p>
 <div class="grid params-grid">
   {% for label, key in fields %}
-    <label>
+    <label title="{{ param_help(key) }}">
       <span class="field-label">{{ label }}</span>
       <input name="param_{{ key }}" value="{{ values.get(key, '') }}" autocomplete="off" spellcheck="false">
     </label>

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import secrets
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -77,6 +79,11 @@ def _list_context() -> dict:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.jinja_env.globals["param_help"] = schemas_mod.help_for
+    app.jinja_env.globals["reboot_spec"] = profiles_mod.reboot_spec
+    # The unit passes the pinned image (e.g. ghcr.io/...:0.1.0-git<hash>) so
+    # the page can show which build is running.
+    app.jinja_env.globals["running_image"] = os.environ.get("BOOTSMITH_IMAGE", "")
     # One session per browser tab, keyed by _sid(). Push/CNFG
     # job state and the push lock live on each Session (see session.py).
     app.config["sessions"] = SessionManager()
@@ -128,6 +135,11 @@ def create_app() -> Flask:
                 pass
 
     threading.Thread(target=_reaper, name="session-reaper", daemon=True).start()
+
+    @app.get("/help")
+    def help_page():
+        """How to use bootsmith, save presets to git and roll out a version."""
+        return render_template("help.html")
 
     @app.get("/")
     def index():
@@ -182,6 +194,9 @@ def create_app() -> Flask:
             loader_hint=loader_hint,
             boot_params=_collect_boot_params(form, loader_hint),
         )
+        err = _set_reboot(profile, form)
+        if err:
+            return err
         profiles_mod.save_profile(profile)
         return _render_profile_list(open_system=system)
 
@@ -325,6 +340,9 @@ def create_app() -> Flask:
             existing.terminal_servers = terminal_servers
         loader_changed = loader_hint != existing.loader_hint
         existing.loader_hint = loader_hint
+        err = _set_reboot(existing, request.form)
+        if err:
+            return err
         # Overwrite boot_params if the form submitted any param_* field,
         # or if the loader changed (old fields don't apply to new loader).
         new_params = _collect_boot_params(request.form, loader_hint)
@@ -755,6 +773,35 @@ def create_app() -> Flask:
         profiles_mod.save_profile(profile)
         return new_section_values, merged
 
+    def _lock_at_prompt(sess):
+        """Take the push lock and check the board answers with its boot prompt.
+
+        Returns None with the lock HELD (caller releases it), or an error
+        response with the lock released. The watcher state alone isn't
+        enough: after a Boot or a reboot from the shell it can still say
+        at_prompt, and a push then types boot params into the running OS
+        (seen 2026-11-05 in the team demo).
+        """
+        lock: threading.Lock = sess.push_lock
+        if not lock.acquire(blocking=False):
+            return _error("another push is already in progress"), 409
+        try:
+            loader = sess.watcher.probe_prompt()
+        except ConnectionError as e:
+            lock.release()
+            return _error(f"WTI session is dead: {e}. Click Reconnect."), 502
+        if loader is None:
+            lock.release()
+            return _not_at_prompt(sess)
+        return None
+
+    def _not_at_prompt(sess):
+        return _error(
+            f"{sess.profile.name} is not at its boot prompt (it is probably "
+            "running its OS), so nothing was sent. Reboot it to get back to "
+            "the boot prompt."
+        ), 409
+
     def _ppcbug_section_push(section: str):
         """Save form values for one PPCBug section, push, verify."""
         sess = _current_session()
@@ -762,7 +809,7 @@ def create_app() -> Flask:
             return _error("no session open"), 404
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
-            return _error(f"not at a loader prompt (state={ws.state})"), 409
+            return _not_at_prompt(sess)
         loader = ws.loader or sess.profile.loader_hint
         if loader != "ppcbug":
             return _error("NIOT/ENV only apply to PPCBug"), 400
@@ -774,9 +821,10 @@ def create_app() -> Flask:
             sess.profile, section, request.form
         )
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
 
         # Pick the right driver pair for this section.
         if section == "niot":
@@ -902,7 +950,7 @@ def create_app() -> Flask:
             return _error("no session open"), 404
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
-            return _error(f"not at a loader prompt (state={ws.state})"), 409
+            return _not_at_prompt(sess)
         loader = ws.loader or sess.profile.loader_hint
         if loader == "ppcbug":
             return _error("use the NIOT/ENV buttons for PPCBug pushes"), 400
@@ -910,9 +958,10 @@ def create_app() -> Flask:
         if driver is None:
             return _error(f"no driver for loader {loader!r}"), 400
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
 
         values = dict(sess.profile.boot_params)
         fields = schemas_mod.fields_for(loader)
@@ -1028,9 +1077,10 @@ def create_app() -> Flask:
         if not enabled:
             return _error("no diag commands selected; tick at least one box"), 400
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
         transport = sess.transport
         profile = sess.profile
 
@@ -1099,7 +1149,7 @@ def create_app() -> Flask:
             return _error("no session open"), 404
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
-            return _error(f"not at a loader prompt (state={ws.state})"), 409
+            return _not_at_prompt(sess)
         loader = ws.loader or sess.profile.loader_hint
         if loader != "ppcbug":
             return _error(f"CNFG only supported on PPCBug (loader={loader!r})"), 400
@@ -1113,9 +1163,10 @@ def create_app() -> Flask:
         if not values:
             return _error("nothing to write; fill in at least one field"), 400
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
         transport = sess.transport
         profile = sess.profile
 
@@ -1185,10 +1236,18 @@ def create_app() -> Flask:
         loader = sess.watcher.status().loader or sess.profile.loader_hint
         driver = _driver_for(loader)
         if driver is not None:
+            refused = _lock_at_prompt(sess)
+            if refused:
+                return refused
             try:
                 driver.boot(sess.transport)
             except ConnectionError as e:
                 return _error(f"WTI session is dead during boot: {e}."), 502
+            finally:
+                sess.push_lock.release()
+            # The board is leaving its boot prompt. Without this the watcher
+            # kept saying at_prompt and the next push went into the OS shell.
+            sess.watcher.mark_running()
         # Stay connected so the user can watch the boot scroll past in the
         # live serial pane. Render a small status panel that replaces the
         # params section but keeps the session open.
@@ -1197,6 +1256,51 @@ def create_app() -> Flask:
             profile=sess.profile,
             fields=schemas_mod.fields_for(sess.profile.loader_hint),
         )
+
+    @app.post("/session/reboot")
+    def session_reboot():
+        """Reboot the crate from its running OS with the preset's reboot keys.
+
+        Only from the OS: a probe CR first, and if the boot prompt answers
+        nothing is sent (Boot is the button for that; `exit` typed into
+        PPCBug or the vxWorks boot ROM means something else). Afterwards the
+        watcher waits for the reboot banner and stops the auto-boot as usual.
+        """
+        sess = _current_session()
+        if sess is None:
+            return _error("no session open"), 404
+        spec = profiles_mod.reboot_spec(sess.profile)
+        if not spec:
+            return _error(
+                f"{sess.profile.name} has no reboot set, so nothing was sent. Edit "
+                "the preset and fill in Reboot (e.g. exit, or dbpf <ioc>:SysReset 1). "
+                "A crate that only reboots from its bootbar can't be rebooted here."
+            ), 409
+        try:
+            data = profiles_mod.reboot_bytes(spec)
+        except ValueError as e:
+            return _error(f"preset reboot is invalid: {e}"), 400
+        lock: threading.Lock = sess.push_lock
+        if not lock.acquire(blocking=False):
+            return _error("a push is in progress; reboot after it finishes"), 409
+        try:
+            if sess.watcher.probe_prompt() is not None:
+                return _error(
+                    f"{sess.profile.name} is at its boot prompt, so the reboot "
+                    "was not sent. Use Boot to start it."
+                ), 409
+            sess.transport.write(data)
+        except ConnectionError as e:
+            return _error(f"WTI session is dead: {e}. Click Reconnect."), 502
+        finally:
+            lock.release()
+        sess.watcher.rearm()
+        print(
+            f"[session/reboot] {sess.profile.name} via "
+            f"{sess.terminal_server.host}:{sess.terminal_server.port}: sent {spec!r}",
+            file=sys.stderr, flush=True,
+        )
+        return render_template("_params_rebooting.html", profile=sess.profile, spec=spec)
 
     @app.post("/session/send")
     def session_send():
@@ -1238,6 +1342,21 @@ def create_app() -> Flask:
         return ("", 204)
 
     return app
+
+
+def _set_reboot(profile, form):
+    """Take the preset dialog's Reboot field, if it was sent. Returns an
+    error response for a value that can't be typed, else None."""
+    if "reboot" not in form:
+        return None
+    spec = form.get("reboot", "").strip()
+    if spec:
+        try:
+            profiles_mod.reboot_bytes(spec)
+        except ValueError as e:
+            return _error(f"Reboot: {e}"), 400
+    profile.reboot = spec
+    return None
 
 
 def _collect_boot_params(form, loader: str) -> dict[str, str]:

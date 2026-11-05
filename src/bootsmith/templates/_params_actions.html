@@ -18,10 +18,10 @@
     </form>
   {% else %}
     <form hx-get="/params/edit" hx-target="#params" hx-swap="innerHTML" class="inline">
-      <button type="submit">Edit</button>
+      <button type="submit" title="Change this preset's boot parameters (saved to the preset file, not sent to the crate)">Edit</button>
     </form>
     <form hx-post="/params/push" hx-target="#params" hx-swap="innerHTML" class="inline">
-      <button type="submit" class="primary">Push to board</button>
+      <button type="submit" class="primary" title="Write this preset's boot parameters into the crate's boot ROM and read them back. Needs the boot prompt.">Push to board</button>
     </form>
   {% endif %}
 </div>

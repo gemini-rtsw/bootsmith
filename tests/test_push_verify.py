@@ -40,7 +40,8 @@ class PushVerifyTests(unittest.TestCase):
             terminal_server=profile.terminal_servers[0],
             transport=object(),
             watcher=SimpleNamespace(
-                status=lambda: SimpleNamespace(state="at_prompt", loader="vxworks")
+                status=lambda: SimpleNamespace(state="at_prompt", loader="vxworks"),
+                probe_prompt=lambda: "vxworks",
             ),
         )
         app.config["sessions"].current = lambda sid: sess

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bootsmith Help</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="help-page">
+  <header>
+    <h1><a href="{{ url_for('index') }}">Bootsmith</a> &middot; Help</h1>
+    <p class="tagline">VME boot-parameter editor over WTI serial</p>
+  </header>
+
+  <main class="help">
+    <nav class="help-toc">
+      <a href="#use">Using bootsmith</a>
+      <a href="#states">Console states</a>
+      <a href="#presets">Presets and connections</a>
+      <a href="#git">Saving presets to git</a>
+      <a href="#rollout">Rolling out a new version</a>
+      <a href="#trouble">Troubleshooting</a>
+      <a href="#where">Where things are</a>
+    </nav>
+
+    <section id="use">
+      <h2>Using bootsmith</h2>
+      <p>Bootsmith opens a crate's serial console through a WTI terminal server,
+        catches the crate's reboot, stops the auto-boot at the boot prompt, writes
+        the boot parameters from a preset, and boots it.</p>
+      <ol>
+        <li><strong>Connect.</strong> Open the system (e.g. GNIRSCC) and press
+          <em>Connect</em> next to the console you want. The dialog names the
+          system, preset and console: check them before you press OK. Connecting
+          does nothing to the crate.</li>
+        <li><strong>Pick the preset</strong> in the session header if the one
+          shown isn't the one you want (e.g. <code>-new-bootserver</code> vs
+          production). Switching keeps the connection.</li>
+        <li><strong>Reboot the crate</strong> with <em>Reboot</em> in the session
+          header. It sends the preset's reboot keys (Ctrl-X on vxWorks unless the
+          preset says otherwise) and asks first, naming the crate. You can also
+          type the reboot in the console. When the boot ROM starts bootsmith
+          sends the abort key, and the state turns <em>AT PROMPT</em>.</li>
+        <li><strong>Push to board</strong> writes every parameter of the preset
+          and reads them back. Any field that didn't read back is listed.</li>
+        <li><strong>Boot</strong> (<code>@</code> on vxWorks, <code>NBO</code> on
+          PPCBug) starts the IOC with those parameters. The state turns
+          <em>OS running</em> and Push is switched off until the crate is back
+          at its boot prompt, so a second push can't be typed into the IOC
+          shell.</li>
+        <li><strong>Disconnect</strong> when done. The crate keeps running.</li>
+      </ol>
+      <p>Bootsmith asks for confirmation before Connect and before anything that
+        reboots a crate (Boot, Reboot, a typed <code>reboot</code>/<code>reset</code>/<code>exit</code>,
+        Ctrl-X), and before deleting a preset or connection. Pushes and other
+        typing don't ask: once connected you have already confirmed the crate.</p>
+      <p><strong>Sharing.</strong> A console opened in a second tab or by a second
+        person is shared: everyone sees the output and can type. Only one push
+        runs at a time per console. Closing a tab releases its share within
+        about 10&nbsp;s; an idle tab (no page open) is dropped after 10&nbsp;minutes.
+        An open tab never times out, and the connection survives a crate reboot.</p>
+      <p>Hover over buttons, the state pill and boot-parameter names for a short
+        explanation.</p>
+    </section>
+
+    <section id="states">
+      <h2>Console states</h2>
+      <table class="params-table">
+        <tr><th>waiting for prompt</th><td>Connected. Waiting for the crate to reboot.</td></tr>
+        <tr><th>&hellip;</th><td>Reboot seen; sending the abort key to stop the auto-boot.</td></tr>
+        <tr><th>AT PROMPT</th><td>At the boot ROM prompt (<code>[VxWorks Boot]:</code>, <code>PPC1-Bug&gt;</code>). Push and Boot are allowed.</td></tr>
+        <tr><th>OS running</th><td>Booted, or a push found no boot prompt. Press Reboot (or reboot from the console) to push again.</td></tr>
+        <tr><th>no prompt detected</th><td>The reboot was seen but the prompt never came (12&nbsp;s). Reboot again, or press Enter in the console and try again.</td></tr>
+      </table>
+      <p>Before every push and Boot, bootsmith sends one Enter and checks the reply
+        ends in the boot prompt. If it doesn't, nothing else is sent.</p>
+    </section>
+
+    <section id="presets">
+      <h2>Presets and connections</h2>
+      <ul>
+        <li>A <strong>preset</strong> is one JSON file: a name, its <code>system</code>,
+          the loader (VxWorks or RTEMS/PPCBug), the consoles it may be used on,
+          and the boot parameters. Example: <code>MKO-PROD-GNIRSCC</code> (production,
+          boots from pisces-control) and <code>MKO-PROD-GNIRSCC-new-bootserver</code>.</li>
+        <li>A <strong>connection</strong> is a console, a terminal server
+          <code>host:port</code>. Connections belong to one system and are never
+          shared between systems, so a GMOS preset can't be pushed to an MCS crate.</li>
+        <li>The <em>Used on</em> (preset dialog) and <em>Used by</em> (connection
+          dialog) checkboxes are the same thing seen from both sides: which presets
+          list that console.</li>
+        <li><strong>Reboot</strong> (preset dialog) is what reboots the crate
+          from its running OS, typed as on the console:
+          <ul>
+            <li><code>^X</code> is Ctrl-X. Any <code>^</code>letter is that control key
+              (<code>^C</code>, and <code>^[</code> is Esc).</li>
+            <li>Text is sent followed by Enter: <code>exit</code> (RTEMS, EPICS 7),
+              <code>dbpf ag:iocStats:SysReset 1</code> (3.14 with iocStats; use that
+              IOC's prefix).</li>
+            <li>Blank: Ctrl-X on vxWorks. RTEMS has no default, so the Reboot button
+              stays off until it is set. Leave it blank for crates that only reboot
+              from their bootbar, and say so in the preset name or notes.</li>
+          </ul>
+          The Reboot button is off at the boot prompt (use Boot there). Before it
+          sends anything, bootsmith presses Enter and refuses if the boot prompt
+          answers, so <code>exit</code> never lands in PPCBug.</li>
+        <li><strong>+ New system</strong> creates the system with its first
+          console and preset.</li>
+      </ul>
+      <p>Saving in bootsmith writes the files on the server
+        (<code>/var/lib/bootsmith/profiles</code>) immediately. It doesn't touch
+        any crate and doesn't commit to git: do that next.</p>
+    </section>
+
+    <section id="git">
+      <h2>Saving presets to git</h2>
+      <p>Presets live in <a href="https://github.com/gemini-rtsw/bootsmith-config">github.com/gemini-rtsw/bootsmith-config</a>
+        (public: no passwords in presets). The server directory is a clone of it.
+        Commit what you changed the same day, so the server and git never drift.</p>
+      <h3>Commit changes made in bootsmith</h3>
+<pre><code>ssh -A mkoswgdkr-lv1.hi.gemini.edu        # -A: your GitHub key does the push
+cd /var/lib/bootsmith/profiles
+git status                                 # what changed
+git diff                                   # check it
+git pull --rebase                          # take others' changes first
+git add -A
+git commit -m "GNIRSCC: point new-bootserver preset at 10.2.2.145 (REL-1234)"
+git push</code></pre>
+      <p>If <code>git push</code> is rejected because main is protected, push a branch
+        and open a pull request instead:</p>
+<pre><code>git switch -c REL-1234
+git push -u origin REL-1234                # open the PR from the link git prints
+# after it is merged:
+git switch main &amp;&amp; git pull</code></pre>
+      <h3>Changes made on GitHub (a merged PR)</h3>
+<pre><code>cd /var/lib/bootsmith/profiles &amp;&amp; git pull &amp;&amp; git log --oneline -1</code></pre>
+      <p>No restart is needed: bootsmith reads the files on every page load.
+        Delete any copied-in (scp) preset files before <code>git pull</code> or it
+        will refuse to overwrite them.</p>
+      <h3>Testing a preset branch for a TR</h3>
+<pre><code>git fetch origin REL-1234:REL-1234 &amp;&amp; git checkout REL-1234
+# ... TR ...
+git checkout main</code></pre>
+    </section>
+
+    <section id="rollout">
+      <h2>Rolling out a new version of bootsmith</h2>
+      <p>Code is in <a href="https://github.com/gemini-rtsw/bootsmith">github.com/gemini-rtsw/bootsmith</a>.
+        Merging a pull request to main makes gemini-rtsw-ci build an RPM and a
+        container image named after the <strong>merge commit</strong>:
+        <code>bootsmith-0.1.0-3.git&lt;hash&gt;.el9.noarch.rpm</code> and
+        <code>ghcr.io/gemini-rtsw/bootsmith:0.1.0-git&lt;hash&gt;</code>. Wait for
+        the Actions run to finish, then on mkoswgdkr-lv1:</p>
+<pre><code># 1. Refresh the local RPM mirror (port 8081)
+docker pull ghcr.io/gemini-rtsw/rpm-repo:latest
+docker rm -f rpm-repo
+docker run -d --name rpm-repo --restart unless-stopped -p 8081:8080 \
+  --log-opt max-size=10m --log-opt max-file=3 ghcr.io/gemini-rtsw/rpm-repo:latest
+docker exec rpm-repo sh -c 'ls /usr/share/nginx/html/rpm-repo/ | grep bootsmith'
+
+# 2. Install the RPM
+sudo dnf --disablerepo='*' install --nogpgcheck \
+  http://localhost:8081/rpm-repo/bootsmith-0.1.0-3.git&lt;hash&gt;.el9.noarch.rpm
+rpm -q bootsmith
+
+# 3. Pull the image and restart (the RPM does neither)
+docker pull ghcr.io/gemini-rtsw/bootsmith:0.1.0-git&lt;hash&gt;
+sudo systemctl daemon-reload &amp;&amp; sudo systemctl restart bootsmith
+docker ps --format '{{ '{{' }}.Image{{ '}}' }}' --filter name=bootsmith
+sudo journalctl -u bootsmith -n 20 --no-pager</code></pre>
+      <p>It worked when <code>rpm -q</code> and <code>docker ps</code> both end in
+        <code>git&lt;hash&gt;</code> and the journal ends with
+        <code>Listening at: http://0.0.0.0:8080</code>. The footer of this page
+        shows the running image. Then hard-refresh the browser (Ctrl-Shift-R).</p>
+      <ul>
+        <li><strong>Check nobody is mid-boot first:</strong> the restart drops every open console.</li>
+        <li><strong>dnf refuses with "a higher version is already installed"?</strong>
+          rpm sorts the hash as text, so a newer build can look older. Use
+          <code>sudo dnf --disablerepo='*' downgrade --nogpgcheck &lt;same url&gt;</code>.
+          Run <code>install</code> first; only use <code>downgrade</code> when dnf says so.</li>
+        <li><strong>Image pull times out</strong> (<code>dial tcp ...:443: i/o timeout</code>):
+          run it again; GHCR has several addresses and one is sometimes unreachable.</li>
+        <li><strong>Rollback:</strong> install the previous RPM the same way, pull its image, restart.</li>
+      </ul>
+    </section>
+
+    <section id="trouble">
+      <h2>Troubleshooting</h2>
+      <dl>
+        <dt>&ldquo;&hellip; is not at its boot prompt &hellip; nothing was sent&rdquo;</dt>
+        <dd>The crate is running its OS. Reboot it from the console and wait for AT PROMPT.</dd>
+        <dt>Connect takes long or fails</dt>
+        <dd>About 11&nbsp;s when the port refuses, up to 40&nbsp;s when it times out. Someone else
+          (or a stuck telnet) may hold the WTI port, or IT hasn't opened the port to
+          mkoswgdkr-lv1. Press Cancel to stop.</dd>
+        <dt>&ldquo;unit_number&rdquo; didn't read back on an mv167</dt>
+        <dd>The vxWorks 5.2 ROM has no unit-number field. Harmless.</dd>
+        <dt>A few blank prompts appear on the crate's console log</dt>
+        <dd>That is bootsmith connecting (it sends Enter to find the prompt). It doesn't reboot anything.</dd>
+        <dt>Who pushed what, and when</dt>
+        <dd><code>sudo journalctl -u bootsmith --since "YYYY-MM-DD HH:MM" --until "..." --no-pager</code>
+          on mkoswgdkr-lv1. The crate side is in TED: <code>Press any key to stop auto-boot</code>,
+          then <code>c</code> and <code>p</code>.</dd>
+      </dl>
+    </section>
+
+    <section id="where">
+      <h2>Where things are</h2>
+      <ul>
+        <li>Server: <code>mkoswgdkr-lv1.hi.gemini.edu</code>, service <code>bootsmith</code>, port 8080.</li>
+        <li>Presets: <code>/var/lib/bootsmith/profiles</code> (clone of bootsmith-config).</li>
+        <li>Unit: <code>/usr/lib/systemd/system/bootsmith.service</code> (pins the image), settings in <code>/etc/sysconfig/bootsmith</code>.</li>
+        <li>Running image: <code>{{ running_image or "unknown (unit predates this field)" }}</code>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <small><a href="{{ url_for('index') }}">Back to bootsmith</a> &middot; {{ running_image or "bootsmith" }}</small>
+  </footer>
+</body>
+</html>

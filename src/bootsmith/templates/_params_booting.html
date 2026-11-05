@@ -1,9 +1,9 @@
 {% set boot_cmd = "NBO" if profile.loader_hint == "ppcbug" else "@" %}
-{% include "_params_actions.html" %}
 <h3>Booting {{ profile.name }}…</h3>
 <p class="hint">
   <code>{{ boot_cmd }}</code> sent. Watch the live serial pane above for
   boot output. The session stays open so you can intervene via the
-  terminal input.
+  terminal input. Push is off until the board is back at its boot prompt:
+  reboot it and bootsmith stops the auto-boot again.
 </p>
 {% include "_params_table.html" %}

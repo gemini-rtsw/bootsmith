@@ -52,6 +52,12 @@ class FakeWatcher:
     def force_prompt(self):
         pass
 
+    def probe_prompt(self):
+        return self.profile.loader_hint
+
+    def mark_running(self):
+        pass
+
     def status(self):
         return SimpleNamespace(
             state="at_prompt", loader=self.profile.loader_hint,

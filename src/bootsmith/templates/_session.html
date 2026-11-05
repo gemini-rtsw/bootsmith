@@ -12,7 +12,7 @@
        the connection (and any other viewers) as they are. #}
     <form hx-post="/session/preset" hx-target="#main" hx-swap="innerHTML"
           hx-trigger="change" class="inline preset-select">
-      <label>Preset
+      <label title="Which preset this tab shows and pushes. Switching keeps the connection; other tabs keep their own preset.">Preset
         <select name="name">
           {% for p in presets %}
             <option value="{{ p.name }}" {% if p.name == profile.name %}selected{% endif %}>{{ p.name }}</option>
@@ -25,15 +25,26 @@
 
           hx-confirm="Boot this crate now ({{ boot_label }}). It loads the IOC with the boot parameters it holds."
           data-confirm-ok="Boot">
-      <button type="submit" class="primary">{{ boot_label }}</button>
+      <button type="submit" id="boot-btn" class="primary" title="Boot from the boot prompt with the parameters the crate holds ({{ '@' if boot_label == 'Boot (@)' else 'NBO' }}). Only works when the crate is at its boot prompt.">{{ boot_label }}</button>
+    </form>
+    {# Reboot from the running OS with the preset's keys (^X = Ctrl-X).
+       The server checks first that the crate is not at its boot prompt. #}
+    {% set reboot = reboot_spec(profile) %}
+    <form hx-post="/session/reboot" hx-target="#params" hx-swap="innerHTML" class="inline"
+          hx-disinherit="hx-confirm"
+          hx-confirm="Reboot this crate (sends {{ reboot }}). Everything it runs stops and its mechanisms lose their index."
+          data-confirm-ok="Reboot">
+      <button type="submit" id="reboot-btn" class="danger" data-has-reboot="{{ 1 if reboot else 0 }}"
+              {% if not reboot %}disabled{% endif %}
+              title="{% if reboot %}Reboot from the running OS by sending {{ reboot }} (set per preset: Edit preset, Reboot). Off at the boot prompt: use Boot there.{% else %}No reboot set for this preset. Edit the preset and fill in Reboot (e.g. exit, or dbpf &lt;ioc&gt;:SysReset 1). Crates that need the bootbar can't be rebooted from here.{% endif %}">Reboot{% if reboot %} ({{ reboot }}){% endif %}</button>
     </form>
     <form hx-post="/session/close" hx-target="#main" hx-swap="innerHTML" class="inline">
-      <button type="submit" class="danger">Disconnect</button>
+      <button type="submit" class="danger" title="Close this tab's console. The crate keeps running; other tabs on this console stay connected.">Disconnect</button>
     </form>
   </div>
 
   <div class="status-bar">
-    <span id="status-state" class="state-pill">connecting</span>
+    <span id="status-state" class="state-pill" title="Where the crate is: waiting for a reboot, at its boot prompt (push allowed), or running its OS.">connecting</span>
     <span id="status-loader"></span>
     <span id="status-aborts"></span>
     <span id="status-bytes"></span>

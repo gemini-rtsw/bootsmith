@@ -17,6 +17,9 @@ STATE_WAITING = "waiting"       # connected, watching for banner
 STATE_ABORTING = "aborting"     # banner seen, spamming abort key
 STATE_AT_PROMPT = "at_prompt"   # prompt matched, loader identified
 STATE_MISSED = "missed"         # banner seen but never reached prompt — user must retry
+STATE_RUNNING = "running"       # Boot sent / prompt gone: the OS is (probably) running.
+                                # Watches for a banner like WAITING, but the UI knows
+                                # the board was booted and offers no pushes.
 
 
 @dataclass
@@ -113,6 +116,51 @@ class BannerWatcher:
         if self._on_state_change:
             self._on_state_change(self.status())
 
+    def mark_running(self) -> None:
+        """The board left its boot prompt (Boot sent, or a probe found no prompt).
+
+        Pushes are refused until the watcher sees the loader prompt again,
+        so a second push can't be typed into the running OS's shell.
+        """
+        with self._lock:
+            self._status = WatcherStatus(state=STATE_RUNNING, loader=self._status.loader)
+        if self._on_state_change:
+            self._on_state_change(self.status())
+
+    _PROBE_TIMEOUT_S = 2.0
+
+    def probe_prompt(self) -> Optional[str]:
+        """Send CR now and return the loader whose prompt comes back, else None.
+
+        Callers hold the session's push_lock so the CR can't land inside
+        another dialogue. A CR is harmless at a boot prompt and at a
+        vxWorks/iocsh shell (it just reprints the prompt). Updates the state:
+        prompt seen -> AT_PROMPT, not seen -> RUNNING.
+        """
+        q = self._transport.subscribe(seed_history=False)
+        buf = bytearray()
+        loader: Optional[str] = None
+        try:
+            self._transport.write(b"\r")
+            deadline = time.time() + self._PROBE_TIMEOUT_S
+            while time.time() < deadline:
+                while q:
+                    buf.extend(q.popleft())
+                loader = self._match_prompt(bytes(buf))
+                if loader is not None:
+                    break
+                time.sleep(0.02)
+        finally:
+            self._transport.unsubscribe(q)
+        if loader is not None:
+            with self._lock:
+                self._status.loader = loader
+                self._status.last_prompt_at = time.time()
+            self._set_state(STATE_AT_PROMPT)
+        else:
+            self.mark_running()
+        return loader
+
     def force_prompt(self) -> None:
         """Skip banner detection — assume the board is already at a prompt.
 
@@ -147,7 +195,7 @@ class BannerWatcher:
 
                 state = self.status().state
 
-                if state == STATE_WAITING:
+                if state in (STATE_WAITING, STATE_RUNNING):
                     if made_progress:
                         hit = self._match_banner(buf)
                         if hit is not None:

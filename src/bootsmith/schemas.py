@@ -24,6 +24,11 @@ LOADER_LABELS: dict[str, str] = {
 }
 
 
+def help_for(key: str) -> str:
+    """Hover text for a boot-param key ('' when there is none)."""
+    return vxworks.FIELD_HELP.get(key, "")
+
+
 def fields_for(loader: str) -> tuple[tuple[str, str], ...]:
     return SCHEMAS.get(loader, ())
 
