@@ -36,9 +36,10 @@
         <li><strong>Pick the preset</strong> in the session header if the one
           shown isn't the one you want (e.g. <code>-new-bootserver</code> vs
           production). Switching keeps the connection.</li>
-        <li><strong>Reboot the crate</strong> from its console: Ctrl-X or type
-          <code>reboot</code> (vxWorks shell), <code>exit</code> (EPICS 7 iocsh).
-          Bootsmith asks first, naming the crate. When the boot ROM starts it
+        <li><strong>Reboot the crate</strong> with <em>Reboot</em> in the session
+          header. It sends the preset's reboot keys (Ctrl-X on vxWorks unless the
+          preset says otherwise) and asks first, naming the crate. You can also
+          type the reboot in the console. When the boot ROM starts bootsmith
           sends the abort key, and the state turns <em>AT PROMPT</em>.</li>
         <li><strong>Push to board</strong> writes every parameter of the preset
           and reads them back. Any field that didn't read back is listed.</li>
@@ -50,7 +51,7 @@
         <li><strong>Disconnect</strong> when done. The crate keeps running.</li>
       </ol>
       <p>Bootsmith asks for confirmation before Connect and before anything that
-        reboots a crate (Boot, a typed <code>reboot</code>/<code>reset</code>/<code>exit</code>,
+        reboots a crate (Boot, Reboot, a typed <code>reboot</code>/<code>reset</code>/<code>exit</code>,
         Ctrl-X), and before deleting a preset or connection. Pushes and other
         typing don't ask: once connected you have already confirmed the crate.</p>
       <p><strong>Sharing.</strong> A console opened in a second tab or by a second
@@ -68,7 +69,7 @@
         <tr><th>waiting for prompt</th><td>Connected. Waiting for the crate to reboot.</td></tr>
         <tr><th>&hellip;</th><td>Reboot seen; sending the abort key to stop the auto-boot.</td></tr>
         <tr><th>AT PROMPT</th><td>At the boot ROM prompt (<code>[VxWorks Boot]:</code>, <code>PPC1-Bug&gt;</code>). Push and Boot are allowed.</td></tr>
-        <tr><th>OS running</th><td>Booted, or a push found no boot prompt. Reboot to push again.</td></tr>
+        <tr><th>OS running</th><td>Booted, or a push found no boot prompt. Press Reboot (or reboot from the console) to push again.</td></tr>
         <tr><th>no prompt detected</th><td>The reboot was seen but the prompt never came (12&nbsp;s). Reboot again, or press Enter in the console and try again.</td></tr>
       </table>
       <p>Before every push and Boot, bootsmith sends one Enter and checks the reply
@@ -88,6 +89,21 @@
         <li>The <em>Used on</em> (preset dialog) and <em>Used by</em> (connection
           dialog) checkboxes are the same thing seen from both sides: which presets
           list that console.</li>
+        <li><strong>Reboot</strong> (preset dialog) is what reboots the crate
+          from its running OS, typed as on the console:
+          <ul>
+            <li><code>^X</code> is Ctrl-X. Any <code>^</code>letter is that control key
+              (<code>^C</code>, and <code>^[</code> is Esc).</li>
+            <li>Text is sent followed by Enter: <code>exit</code> (RTEMS, EPICS 7),
+              <code>dbpf ag:iocStats:SysReset 1</code> (3.14 with iocStats; use that
+              IOC's prefix).</li>
+            <li>Blank: Ctrl-X on vxWorks. RTEMS has no default, so the Reboot button
+              stays off until it is set. Leave it blank for crates that only reboot
+              from their bootbar, and say so in the preset name or notes.</li>
+          </ul>
+          The Reboot button is off at the boot prompt (use Boot there). Before it
+          sends anything, bootsmith presses Enter and refuses if the boot prompt
+          answers, so <code>exit</code> never lands in PPCBug.</li>
         <li><strong>+ New system</strong> creates the system with its first
           console and preset.</li>
       </ul>

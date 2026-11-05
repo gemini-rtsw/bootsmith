@@ -450,3 +450,4 @@ header h1 a { color: inherit; text-decoration: none; }
 .help dd { margin: 0.25rem 0 0 1rem; color: var(--fg); }
 .help .params-table th { text-align: left; white-space: nowrap; padding-right: 1rem; vertical-align: top; }
 footer a { color: var(--accent); }
+.session-header button:disabled { cursor: not-allowed; opacity: 0.45; }

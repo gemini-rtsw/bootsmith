@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -79,6 +80,7 @@ def _list_context() -> dict:
 def create_app() -> Flask:
     app = Flask(__name__)
     app.jinja_env.globals["param_help"] = schemas_mod.help_for
+    app.jinja_env.globals["reboot_spec"] = profiles_mod.reboot_spec
     # The unit passes the pinned image (e.g. ghcr.io/...:0.1.0-git<hash>) so
     # the page can show which build is running.
     app.jinja_env.globals["running_image"] = os.environ.get("BOOTSMITH_IMAGE", "")
@@ -192,6 +194,9 @@ def create_app() -> Flask:
             loader_hint=loader_hint,
             boot_params=_collect_boot_params(form, loader_hint),
         )
+        err = _set_reboot(profile, form)
+        if err:
+            return err
         profiles_mod.save_profile(profile)
         return _render_profile_list(open_system=system)
 
@@ -335,6 +340,9 @@ def create_app() -> Flask:
             existing.terminal_servers = terminal_servers
         loader_changed = loader_hint != existing.loader_hint
         existing.loader_hint = loader_hint
+        err = _set_reboot(existing, request.form)
+        if err:
+            return err
         # Overwrite boot_params if the form submitted any param_* field,
         # or if the loader changed (old fields don't apply to new loader).
         new_params = _collect_boot_params(request.form, loader_hint)
@@ -1249,6 +1257,51 @@ def create_app() -> Flask:
             fields=schemas_mod.fields_for(sess.profile.loader_hint),
         )
 
+    @app.post("/session/reboot")
+    def session_reboot():
+        """Reboot the crate from its running OS with the preset's reboot keys.
+
+        Only from the OS: a probe CR first, and if the boot prompt answers
+        nothing is sent (Boot is the button for that; `exit` typed into
+        PPCBug or the vxWorks boot ROM means something else). Afterwards the
+        watcher waits for the reboot banner and stops the auto-boot as usual.
+        """
+        sess = _current_session()
+        if sess is None:
+            return _error("no session open"), 404
+        spec = profiles_mod.reboot_spec(sess.profile)
+        if not spec:
+            return _error(
+                f"{sess.profile.name} has no reboot set, so nothing was sent. Edit "
+                "the preset and fill in Reboot (e.g. exit, or dbpf <ioc>:SysReset 1). "
+                "A crate that only reboots from its bootbar can't be rebooted here."
+            ), 409
+        try:
+            data = profiles_mod.reboot_bytes(spec)
+        except ValueError as e:
+            return _error(f"preset reboot is invalid: {e}"), 400
+        lock: threading.Lock = sess.push_lock
+        if not lock.acquire(blocking=False):
+            return _error("a push is in progress; reboot after it finishes"), 409
+        try:
+            if sess.watcher.probe_prompt() is not None:
+                return _error(
+                    f"{sess.profile.name} is at its boot prompt, so the reboot "
+                    "was not sent. Use Boot to start it."
+                ), 409
+            sess.transport.write(data)
+        except ConnectionError as e:
+            return _error(f"WTI session is dead: {e}. Click Reconnect."), 502
+        finally:
+            lock.release()
+        sess.watcher.rearm()
+        print(
+            f"[session/reboot] {sess.profile.name} via "
+            f"{sess.terminal_server.host}:{sess.terminal_server.port}: sent {spec!r}",
+            file=sys.stderr, flush=True,
+        )
+        return render_template("_params_rebooting.html", profile=sess.profile, spec=spec)
+
     @app.post("/session/send")
     def session_send():
         sess = _current_session()
@@ -1289,6 +1342,21 @@ def create_app() -> Flask:
         return ("", 204)
 
     return app
+
+
+def _set_reboot(profile, form):
+    """Take the preset dialog's Reboot field, if it was sent. Returns an
+    error response for a value that can't be typed, else None."""
+    if "reboot" not in form:
+        return None
+    spec = form.get("reboot", "").strip()
+    if spec:
+        try:
+            profiles_mod.reboot_bytes(spec)
+        except ValueError as e:
+            return _error(f"Reboot: {e}"), 400
+    profile.reboot = spec
+    return None
 
 
 def _collect_boot_params(form, loader: str) -> dict[str, str]:

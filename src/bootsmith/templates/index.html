@@ -430,6 +430,13 @@
             banner.classList.add("hidden");
           }
         }
+        // Boot only at the boot prompt; Reboot only away from it (and only
+        // when the preset says how). The server checks again before sending.
+        const bootBtn = document.getElementById("boot-btn");
+        if (bootBtn) bootBtn.disabled = j.state !== "at_prompt";
+        const rebootBtn = document.getElementById("reboot-btn");
+        if (rebootBtn) rebootBtn.disabled = rebootBtn.dataset.hasReboot !== "1"
+          || j.state === "at_prompt" || j.state === "aborting";
         if (paramsContainer && j.state === "at_prompt"
             && (j.loader === "vxworks" || j.loader === "ppcbug")) {
           if (paramsLoadedForLoader !== j.loader) {

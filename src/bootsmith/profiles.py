@@ -67,6 +67,11 @@ class Profile:
     # preset's system never depends on how its name is spelled; "" only in
     # files written before the field existed (see system_of).
     system: str = ""
+    # How to reboot the crate from its running OS, as typed on the
+    # console: "^X" is Ctrl-X, text is sent followed by Enter ("exit",
+    # "dbpf ag:iocStats:SysReset 1"). "" uses the loader's default
+    # (vxWorks: ^X; RTEMS has none, so its presets must set one).
+    reboot: str = ""
 
     def terminal_server(self, name: str) -> TerminalServer | None:
         for ts in self.terminal_servers:
@@ -195,6 +200,7 @@ def duplicate_profile(name: str) -> Profile:
         boot_params=dict(src.boot_params),
         notes=src.notes,
         system=system_of(src),
+        reboot=src.reboot,
     )
     save_profile(copy)
     return copy
@@ -225,7 +231,60 @@ def _load_path(path: Path) -> Profile:
         boot_params=boot_params,
         notes=data.get("notes", ""),
         system=(data.get("system") or "").strip().upper(),
+        reboot=data.get("reboot", ""),
     )
+
+
+# --- Reboot keys ----------------------------------------------------------
+
+# The loader's reboot when a preset doesn't set one. vxWorks reboots on
+# Ctrl-X from its shell. RTEMS IOCs differ (exit on EPICS 7, dbpf
+# <ioc>:SysReset 1 with iocStats on 3.14, or only the bootbar), so they get
+# no default and the Reboot button stays off until the preset says how.
+DEFAULT_REBOOT = {"vxworks": "^X"}
+
+
+def reboot_spec(profile: Profile) -> str:
+    """The preset's reboot as typed, or the loader default, or ""."""
+    return (profile.reboot or "").strip() or DEFAULT_REBOOT.get(profile.loader_hint, "")
+
+
+def reboot_bytes(spec: str) -> bytes:
+    """Turn a reboot spec into the bytes sent to the console.
+
+    Caret notation (as in stty/vi) gives control keys: ^X is Ctrl-X.
+    Text is typed as is, and Enter is added after it unless the spec ends
+    in a control key: "^X" -> b"\x18", "exit" -> b"exit\r",
+    "dbpf ag:iocStats:SysReset 1" -> b"dbpf ag:iocStats:SysReset 1\r".
+    Raises ValueError for an empty spec, ^ with nothing valid after it, or
+    a non-printable character.
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        raise ValueError("no reboot set")
+    out = bytearray()
+    i = 0
+    ends_in_key = False
+    while i < len(spec):
+        ch = spec[i]
+        if ch == "^":
+            nxt = spec[i + 1:i + 2].upper()
+            if not nxt or not ("@" <= nxt <= "_"):
+                raise ValueError(
+                    f"{spec!r}: ^ must be followed by a letter (^X is Ctrl-X) or one of @[\\]^_"
+                )
+            out.append(ord(nxt) - 0x40)
+            i += 2
+            ends_in_key = True
+            continue
+        if not (" " <= ch <= "~"):
+            raise ValueError(f"{spec!r}: only printable ASCII and ^ keys")
+        out.append(ord(ch))
+        i += 1
+        ends_in_key = False
+    if not ends_in_key:
+        out += b"\r"
+    return bytes(out)
 
 
 def names(profiles: Iterable[Profile]) -> list[str]:
