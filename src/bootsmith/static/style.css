@@ -219,6 +219,7 @@ button.danger {
 .state-pill.state-aborting { color: #ffeaa3; border-color: #6e5a18; background: #2a230a; }
 .state-pill.state-at_prompt { color: #b8f0c0; border-color: #2b5e36; background: #122318; }
 .state-pill.state-missed { color: #ffc7c7; border-color: #6c2828; background: #2a1414; }
+.state-pill.state-running { color: #ffe3a8; border-color: #6a5420; background: #241d0c; }
 .state-pill.state-closed { color: var(--muted); }
 
 .banner {

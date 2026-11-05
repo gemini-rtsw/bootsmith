@@ -109,6 +109,7 @@
         aborting: "...",
         at_prompt: "AT PROMPT",
         missed: "no prompt detected",
+        running: "OS running",
       };
 
       let sse = null;
@@ -432,6 +433,15 @@
             });
           }
         } else if (j.state !== "at_prompt") {
+          // Left the boot prompt (Boot sent, crate rebooted, or a push found
+          // no prompt): take the Push buttons away so nothing gets typed
+          // into the running OS.
+          if (paramsContainer && paramsLoadedForLoader !== null) {
+            paramsContainer.innerHTML = '<p class="hint">' + (j.state === "running"
+              ? "Booted: the crate is running its OS. Reboot it to get back to the boot prompt and push again."
+              : "Not at the boot prompt. Reboot the crate; bootsmith stops the auto-boot and the params come back here.")
+              + "</p>";
+          }
           paramsLoadedForLoader = null;
         }
       }

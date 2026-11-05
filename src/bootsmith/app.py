@@ -755,6 +755,35 @@ def create_app() -> Flask:
         profiles_mod.save_profile(profile)
         return new_section_values, merged
 
+    def _lock_at_prompt(sess):
+        """Take the push lock and check the board answers with its boot prompt.
+
+        Returns None with the lock HELD (caller releases it), or an error
+        response with the lock released. The watcher state alone isn't
+        enough: after a Boot or a reboot from the shell it can still say
+        at_prompt, and a push then types boot params into the running OS
+        (seen 2026-11-05 in the team demo).
+        """
+        lock: threading.Lock = sess.push_lock
+        if not lock.acquire(blocking=False):
+            return _error("another push is already in progress"), 409
+        try:
+            loader = sess.watcher.probe_prompt()
+        except ConnectionError as e:
+            lock.release()
+            return _error(f"WTI session is dead: {e}. Click Reconnect."), 502
+        if loader is None:
+            lock.release()
+            return _not_at_prompt(sess)
+        return None
+
+    def _not_at_prompt(sess):
+        return _error(
+            f"{sess.profile.name} is not at its boot prompt (it is probably "
+            "running its OS), so nothing was sent. Reboot it to get back to "
+            "the boot prompt."
+        ), 409
+
     def _ppcbug_section_push(section: str):
         """Save form values for one PPCBug section, push, verify."""
         sess = _current_session()
@@ -762,7 +791,7 @@ def create_app() -> Flask:
             return _error("no session open"), 404
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
-            return _error(f"not at a loader prompt (state={ws.state})"), 409
+            return _not_at_prompt(sess)
         loader = ws.loader or sess.profile.loader_hint
         if loader != "ppcbug":
             return _error("NIOT/ENV only apply to PPCBug"), 400
@@ -774,9 +803,10 @@ def create_app() -> Flask:
             sess.profile, section, request.form
         )
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
 
         # Pick the right driver pair for this section.
         if section == "niot":
@@ -902,7 +932,7 @@ def create_app() -> Flask:
             return _error("no session open"), 404
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
-            return _error(f"not at a loader prompt (state={ws.state})"), 409
+            return _not_at_prompt(sess)
         loader = ws.loader or sess.profile.loader_hint
         if loader == "ppcbug":
             return _error("use the NIOT/ENV buttons for PPCBug pushes"), 400
@@ -910,9 +940,10 @@ def create_app() -> Flask:
         if driver is None:
             return _error(f"no driver for loader {loader!r}"), 400
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
 
         values = dict(sess.profile.boot_params)
         fields = schemas_mod.fields_for(loader)
@@ -1028,9 +1059,10 @@ def create_app() -> Flask:
         if not enabled:
             return _error("no diag commands selected; tick at least one box"), 400
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
         transport = sess.transport
         profile = sess.profile
 
@@ -1099,7 +1131,7 @@ def create_app() -> Flask:
             return _error("no session open"), 404
         ws = sess.watcher.status()
         if ws.state != "at_prompt":
-            return _error(f"not at a loader prompt (state={ws.state})"), 409
+            return _not_at_prompt(sess)
         loader = ws.loader or sess.profile.loader_hint
         if loader != "ppcbug":
             return _error(f"CNFG only supported on PPCBug (loader={loader!r})"), 400
@@ -1113,9 +1145,10 @@ def create_app() -> Flask:
         if not values:
             return _error("nothing to write; fill in at least one field"), 400
 
+        refused = _lock_at_prompt(sess)
+        if refused:
+            return refused
         lock: threading.Lock = sess.push_lock
-        if not lock.acquire(blocking=False):
-            return _error("another push is already in progress"), 409
         transport = sess.transport
         profile = sess.profile
 
@@ -1185,10 +1218,18 @@ def create_app() -> Flask:
         loader = sess.watcher.status().loader or sess.profile.loader_hint
         driver = _driver_for(loader)
         if driver is not None:
+            refused = _lock_at_prompt(sess)
+            if refused:
+                return refused
             try:
                 driver.boot(sess.transport)
             except ConnectionError as e:
                 return _error(f"WTI session is dead during boot: {e}."), 502
+            finally:
+                sess.push_lock.release()
+            # The board is leaving its boot prompt. Without this the watcher
+            # kept saying at_prompt and the next push went into the OS shell.
+            sess.watcher.mark_running()
         # Stay connected so the user can watch the boot scroll past in the
         # live serial pane. Render a small status panel that replaces the
         # params section but keeps the session open.
