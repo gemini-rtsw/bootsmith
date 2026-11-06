@@ -18,7 +18,7 @@ from . import ppcbug as ppcbug_mod
 from . import profiles as profiles_mod
 from . import schemas as schemas_mod
 from . import vxworks as vxworks_mod
-from .session import ConnectCancelled, PortInUseError, SessionManager
+from .session import ConnectCancelled, PortBusyError, PortInUseError, SessionManager
 
 # Browser identity for multi-session support: each browser gets a random
 # id cookie and its own session (WTI connection, push/CNFG jobs).
@@ -481,11 +481,29 @@ def create_app() -> Flask:
         sessions.close(_sid())
         return _render_profile_list()
 
+    @app.post("/connections/disconnect-all")
+    def connections_disconnect_all():
+        """Free a WTI port held by bootsmith: drop every tab on it."""
+        try:
+            key = (request.form["host"].strip(), int(request.form["port"]))
+        except (KeyError, ValueError):
+            return _error("host and port are required"), 400
+        try:
+            n = app.config["sessions"].disconnect_port(key, by=request.remote_addr or "")
+        except PortBusyError as e:
+            return _error(str(e)), 409
+        print(
+            f"[connections/disconnect-all] {key[0]}:{key[1]}: {n} tab(s) dropped "
+            f"by {request.remote_addr}",
+            file=sys.stderr, flush=True,
+        )
+        return _render_profile_list()
+
     @app.get("/session/status")
     def session_status():
         sess = _current_session()
         if sess is None:
-            return jsonify({"open": False})
+            return jsonify({"open": False, "notice": app.config["sessions"].take_notice(_sid())})
         ws = sess.watcher.status()
         return jsonify(
             {

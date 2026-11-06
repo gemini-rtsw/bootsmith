@@ -197,6 +197,49 @@ class MultiSessionTests(unittest.TestCase):
         self.assertTrue(mcs.closed)
         self.assertEqual(self._status(self.b)["viewers"], 2)
 
+    # --- Disconnect all: free a port held by a forgotten tab
+    def _disconnect_all(self, client, port=10003):
+        return client.post("/connections/disconnect-all",
+                           data={"host": "10.2.2.86", "port": str(port)})
+
+    def test_disconnect_all_drops_every_tab_and_closes_port(self):
+        self._open(self.a, "GNIRSCC")
+        self._open(self.b, "GNIRSCC")
+        transport = self._sess(self.a).transport
+        c = self.app.test_client()
+        c.get("/")
+        self._open(c, "MCS")
+        r = self._disconnect_all(c)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(transport.closed)
+        for client in (self.a, self.b):
+            st = self._status(client)
+            self.assertFalse(st["open"])
+            self.assertIn("disconnected for all tabs", st["notice"])
+            # Told once; the next poll is a plain closed session.
+            self.assertEqual(self._status(client)["notice"], "")
+        # Other ports untouched.
+        self.assertEqual(self._status(c)["profile"], "MCS")
+
+    def test_disconnect_all_refused_mid_push(self):
+        self._open(self.a, "GNIRSCC")
+        sess = self._sess(self.a)
+        sess.push_lock.acquire()
+        try:
+            r = self._disconnect_all(self.b)
+        finally:
+            sess.push_lock.release()
+        self.assertEqual(r.status_code, 409)
+        self.assertFalse(sess.transport.closed)
+        self.assertTrue(self._status(self.a)["open"])
+
+    def test_disconnect_all_button_only_on_open_ports(self):
+        self.assertNotIn("Disconnect all", self.b.get("/profiles").get_data(as_text=True))
+        self._open(self.a, "GNIRSCC")
+        html = self.b.get("/profiles").get_data(as_text=True)
+        self.assertEqual(html.count('name="port" value="10003"'), 1)
+        self.assertIn("Disconnect all", html)
+
     def test_idle_viewer_is_reaped_without_closing_shared_port(self):
         self._open(self.a, "GNIRSCC")
         self._open(self.b, "GNIRSCC")
