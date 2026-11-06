@@ -63,6 +63,10 @@ class BannerWatcher:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # Set by rearm()/mark_running(): the run loop drops what it has
+        # buffered so output from before (the old boot prompt) can't be
+        # read as a new reboot.
+        self._clear_buf = threading.Event()
 
         # Build effective patterns: defaults + per-profile overrides.
         self._patterns: list[LoaderPatterns] = []
@@ -111,6 +115,7 @@ class BannerWatcher:
 
     def rearm(self) -> None:
         """Reset to WAITING after a miss so user can reboot again."""
+        self._clear_buf.set()
         with self._lock:
             self._status = WatcherStatus(state=STATE_WAITING)
         if self._on_state_change:
@@ -122,6 +127,7 @@ class BannerWatcher:
         Pushes are refused until the watcher sees the loader prompt again,
         so a second push can't be typed into the running OS's shell.
         """
+        self._clear_buf.set()
         with self._lock:
             self._status = WatcherStatus(state=STATE_RUNNING, loader=self._status.loader)
         if self._on_state_change:
@@ -183,6 +189,9 @@ class BannerWatcher:
         last_abort = 0.0
         try:
             while not self._stop.is_set():
+                if self._clear_buf.is_set():
+                    self._clear_buf.clear()
+                    buf.clear()
                 # Drain queued chunks into the local scan buffer.
                 made_progress = False
                 while q:
