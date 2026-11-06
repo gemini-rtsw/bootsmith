@@ -395,6 +395,16 @@
         if (!j.open) {
           stateEl.textContent = "closed";
           stateEl.className = "state-pill state-closed";
+          if (j.notice) {
+            // Dropped by "Disconnect all" from another tab: say so, stop
+            // polling and switch off the controls of the dead session.
+            if (banner) { banner.textContent = j.notice; banner.classList.remove("hidden"); }
+            stop();
+            document.querySelectorAll(".session button, .session input, .session select")
+              .forEach((el) => { el.disabled = true; });
+            const back = document.querySelector('.session form[hx-post="/session/close"] button');
+            if (back) { back.disabled = false; back.textContent = "Back to systems"; }
+          }
           return;
         }
         const shared = document.getElementById("status-shared");

@@ -107,6 +107,20 @@
                   <button type="button" class="cancel-connect" onclick="bsCancelConnect(this)" title="Stop trying to connect">Cancel</button>
                 </span>
               </form>
+              {% if n %}
+              {# Free the WTI port when a tab was left open somewhere. #}
+              <form hx-post="/connections/disconnect-all" hx-target="#main" hx-swap="innerHTML"
+                    class="inline" hx-disinherit="hx-confirm"
+                    hx-confirm="Disconnect this console in all {{ n }} tab{{ '' if n == 1 else 's' }} and free its WTI port. Whoever has it open is dropped (they see why). The crate keeps running."
+                    data-confirm-ok="Disconnect all"
+                    data-confirm-system="{{ sys.name }}"
+                    data-confirm-preset="(all tabs)"
+                    data-confirm-console="{{ c.name }} &mdash; {{ c.host }}:{{ c.port }}">
+                <input type="hidden" name="host" value="{{ c.host }}">
+                <input type="hidden" name="port" value="{{ c.port }}">
+                <button type="submit" class="danger" title="Drop every tab that has this console open and free the WTI port for telnet or other tools. Refused while a push is running.">Disconnect all</button>
+              </form>
+              {% endif %}
             </div>
           </div>
         {% else %}
