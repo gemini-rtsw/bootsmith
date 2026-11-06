@@ -28,8 +28,10 @@ PPCBUG = LoaderPatterns(
     name="ppcbug",
     # PPCBug banners across versions include "PPC[0-9]-Bug" or "PPCBug" plus
     # the Motorola copyright line. Either is a good early signal.
+    # Not the prompt itself ("PPC1-Bug>"): a prompt answering a CR is not a
+    # reboot, and taking it for one sent Esc into a booting crate.
     banner=re.compile(
-        rb"(Copyright Motorola|PPC[0-9]?[- ]?Bug|PPC[0-9]-Bug)", re.IGNORECASE
+        rb"(Copyright Motorola|PPC[0-9]?[- ]?Bug(?!>))", re.IGNORECASE
     ),
     # Prompt is typically "PPC1-Bug>" or "PPC1>" — match either.
     prompt=re.compile(rb"PPC[0-9](?:-Bug)?>\s*$"),
@@ -42,8 +44,11 @@ VXWORKS = LoaderPatterns(
     name="vxworks",
     # VxWorks boot ROM prints "VxWorks System Boot" and/or "Press any key to
     # stop auto-boot". Either is a strong signal.
+    # Not the prompt "[VxWorks Boot]:" (the brackets exclude it): after
+    # Boot (@) the old prompt still in the buffer was taken for a reboot,
+    # and spaces were sent into the booting crate (2026-11-06).
     banner=re.compile(
-        rb"(VxWorks(?:\s+System)?\s+Boot|Press any key to stop auto-boot)",
+        rb"((?<!\[)VxWorks(?:\s+System)?\s+Boot(?!\])|Press any key to stop auto-boot)",
         re.IGNORECASE,
     ),
     # Prompt is "[VxWorks Boot]:" — sometimes with trailing space.

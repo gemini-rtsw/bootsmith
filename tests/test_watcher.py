@@ -173,3 +173,67 @@ class WatcherTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AfterBootTests(unittest.TestCase):
+    """The boot prompt left in the scan buffer must not count as a reboot.
+
+    2026-11-06: after Boot (@) the watcher took the old "[VxWorks Boot]:"
+    still in its buffer for a reboot banner, sent abort keys into the
+    booting crate and lost track of the state.
+    """
+
+    def _at_prompt(self, profile, banner, prompt):
+        t = FakeTransport()
+        w = BannerWatcher(t, profile)
+        w.start()
+        self.addCleanup(w.stop)
+        t.push(banner)
+        self.assertTrue(_wait_for(lambda: w.status().state == STATE_ABORTING))
+        t.push(prompt)
+        self.assertTrue(_wait_for(lambda: w.status().state == STATE_AT_PROMPT))
+        return t, w
+
+    def test_vxworks_boot_output_keeps_running(self):
+        t, w = self._at_prompt(
+            Profile(name="v", terminal_servers=[], loader_hint="vxworks"),
+            b"VxWorks System Boot\r\nPress any key to stop auto-boot...\r\n 7\r\n",
+            b"\r\n[VxWorks Boot]: ",
+        )
+        t.push(b"\r\n[VxWorks Boot]: ")  # probe CR before Boot
+        w.mark_running()
+        n = len(t.writes)
+        t.push(b"@\r\n\r\nboot device          : ei\r\nprocessor number     : 0\r\n")
+        t.push(b"Attaching network interface ei0... done.\r\nLoading... 1234567\r\n")
+        t.push(b"Starting at 0x10000...\r\n\r\n-> ")
+        time.sleep(0.3)
+        self.assertEqual(w.status().state, "running")
+        self.assertEqual(t.writes[n:], [])
+
+    def test_ppcbug_prompt_is_not_a_banner(self):
+        t, w = self._at_prompt(
+            Profile(name="p", terminal_servers=[], loader_hint="ppcbug"),
+            b"Copyright Motorola Inc. 1988 - 1999, All Rights Reserved\r\n",
+            b"\r\nPPC1-Bug>",
+        )
+        w.mark_running()
+        n = len(t.writes)
+        t.push(b"NBO\r\nNetwork Booting from: DEC21143, Controller 0\r\n")
+        t.push(b"\r\nPPC1-Bug>")  # e.g. a probe answered while running
+        time.sleep(0.3)
+        self.assertNotEqual(w.status().state, STATE_ABORTING)
+        self.assertEqual(t.writes[n:], [])
+
+    def test_real_reboot_after_boot_is_still_caught(self):
+        t, w = self._at_prompt(
+            Profile(name="v", terminal_servers=[], loader_hint="vxworks"),
+            b"VxWorks System Boot\r\n",
+            b"\r\n[VxWorks Boot]: ",
+        )
+        w.mark_running()
+        t.push(b"@\r\nLoading...\r\n-> ")
+        time.sleep(0.1)
+        t.push(b"\r\nVxWorks System Boot\r\nPress any key to stop auto-boot...\r\n")
+        self.assertTrue(_wait_for(lambda: w.status().state == STATE_ABORTING))
+        t.push(b"\r\n[VxWorks Boot]: ")
+        self.assertTrue(_wait_for(lambda: w.status().state == STATE_AT_PROMPT))
