@@ -59,6 +59,12 @@
         runs at a time per console. Closing a tab releases its share within
         about 10&nbsp;s; an idle tab (no page open) is dropped after 10&nbsp;minutes.
         An open tab never times out, and the connection survives a crate reboot.</p>
+      <p><strong>Freeing a console.</strong> The terminal server takes one client
+        per port, so while any bootsmith tab has a console open nothing else
+        (telnet, another tool) can get on. If a tab was left open somewhere, press
+        <em>Disconnect all</em> next to that console in the system list. It drops
+        every tab on it (they are told why) and frees the port; the crate keeps
+        running. It is refused while a push is running.</p>
       <p>Hover over buttons, the state pill and boot-parameter names for a short
         explanation.</p>
     </section>
@@ -193,6 +199,9 @@ sudo journalctl -u bootsmith -n 20 --no-pager</code></pre>
         <dd>About 11&nbsp;s when the port refuses, up to 40&nbsp;s when it times out. Someone else
           (or a stuck telnet) may hold the WTI port, or IT hasn't opened the port to
           mkoswgdkr-lv1. Press Cancel to stop.</dd>
+        <dt>Telnet to the WTI port is refused</dt>
+        <dd>Bootsmith probably has it open in a tab somewhere (the system list shows
+          &ldquo;open in N tabs&rdquo;). Press <em>Disconnect all</em> there.</dd>
         <dt>&ldquo;unit_number&rdquo; didn't read back on an mv167</dt>
         <dd>The vxWorks 5.2 ROM has no unit-number field. Harmless.</dd>
         <dt>A few blank prompts appear on the crate's console log</dt>

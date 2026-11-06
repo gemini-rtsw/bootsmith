@@ -67,6 +67,10 @@ class PortInUseError(ConnectionError):
     """Another browser is still connecting to the WTI port."""
 
 
+class PortBusyError(RuntimeError):
+    """A push or CNFG is running on the port; it can't be dropped now."""
+
+
 class ConnectCancelled(ConnectionError):
     """The browser cancelled its connect before it finished."""
 
@@ -95,6 +99,9 @@ class SessionManager:
         # One cancel flag per browser with a connect in flight; set by
         # cancel_connect() so the retry loop stops and frees the port.
         self._cancels: dict[str, threading.Event] = {}
+        # Tabs dropped by disconnect_port(): sid -> message, shown once by
+        # that tab's next status poll so its user knows why it closed.
+        self._kicked: dict[str, str] = {}
         self._idle_timeout = idle_timeout
         self._leave_grace = leave_grace
 
@@ -306,6 +313,46 @@ class SessionManager:
             sess = self._sessions.pop(sid, None)
         if sess is not None:
             self._release(sess)
+
+    def disconnect_port(self, key: tuple[str, int], by: str = "") -> int:
+        """Drop every tab on this port and close its WTI connection.
+
+        For a console left open in a forgotten tab: the WTI port takes one
+        client, so while bootsmith holds it nothing else (telnet, another
+        tool) can get on. Refused while a push or CNFG runs on it, so a
+        crate is never left with half its parameters written. Returns the
+        number of tabs dropped.
+        """
+        with self._lock:
+            victims = {
+                sid: s for sid, s in self._sessions.items()
+                if (s.terminal_server.host, s.terminal_server.port) == key
+            }
+            if any(s.push_lock.locked() for s in victims.values()):
+                raise PortBusyError(
+                    f"a push is running on {key[0]}:{key[1]}; try again when it finishes"
+                )
+            msg = (
+                f"This console ({key[0]}:{key[1]}) was disconnected for all tabs"
+                + (f" by {by}" if by else "")
+                + ". Connect again if you still need it."
+            )
+            for sid in victims:
+                del self._sessions[sid]
+                self._kicked[sid] = msg
+        closed = set()
+        for s in victims.values():
+            if id(s.transport) in closed:
+                continue
+            closed.add(id(s.transport))
+            s.watcher.stop()
+            s.transport.close()
+        return len(victims)
+
+    def take_notice(self, sid: str) -> str:
+        """The message for a tab dropped by disconnect_port(), once."""
+        with self._lock:
+            return self._kicked.pop(sid, "")
 
     def reap_idle(self) -> list[str]:
         """Close sessions whose browser has gone quiet. Never reaps a
