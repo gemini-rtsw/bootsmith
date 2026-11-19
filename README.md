@@ -57,11 +57,34 @@ install unpacks it; upgrades never touch it. Bootsmith is the pathfinder for
 opening config repos like this to sci/ops: the repo, not the package, is the
 source of truth.
 
+bootsmith reads that directory on every page load, so preset changes need no
+restart. Saving a preset in the UI writes the file there but does not commit
+it; `main` of bootsmith-config is protected, so changes go in by pull request.
+
+Commit presets edited in the UI (log in with `ssh -A` so your GitHub key
+pushes):
+
 ```sh
 cd /var/lib/bootsmith/profiles
-git pull                                  # take presets merged to main; no restart
-git add -A && git commit -m "..." && git push   # keep changes made in the app
+git status && git diff
+git switch -c REL-1234
+git add -A && git commit -m "SCS: <what changed> (REL-1234)"
+git push -u origin REL-1234          # open the PR from the link git prints
 ```
+
+Take presets merged on GitHub (also after your own PR merges):
+
+```sh
+cd /var/lib/bootsmith/profiles
+git switch main
+git fetch origin && git merge --ff-only origin/main
+```
+
+`git pull` works too but can hang when github.com is unreachable; fetch and
+merge separately then. The full procedure (adding a preset, the file format,
+testing a preset branch in a TR) is in the
+[bootsmith-config README](https://github.com/gemini-rtsw/bootsmith-config#readme)
+and on the app's Help page (`/help`).
 
 ## Deploy from GHCR
 
@@ -156,10 +179,12 @@ EPICS IOC or sitting at the boot loader. Bootsmith does **not** power-cycle the 
 ## Profiles
 
 Stored as one JSON file per preset, `<name>.json`. The UI groups presets by
-system, taken from the name: `MKO`/`PROD` prefixes are dropped and the next
-token is the system (`MKO-PROD-GNIRSCC-new-bootserver` and
-`MKO-PROD-GNIRSCC-m2lab` are both `GNIRSCC`), so name new presets that way.
-Within a system, presets that list the same WTI host:port share a connection.
+their `system` field (`GNIRSCC`, `SCS`, ...). Files written before that field
+existed fall back to the name: `MKO`/`PROD` prefixes are dropped and the next
+token is the system (`MKO-PROD-GNIRSCC-new-bootserver` is `GNIRSCC`), so keep
+naming presets that way. Within a system, presets that list the same WTI
+host:port share a connection. Field reference: the
+[bootsmith-config README](https://github.com/gemini-rtsw/bootsmith-config#file-format).
 
 The directory is resolved in
 this order:
